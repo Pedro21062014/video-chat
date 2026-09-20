@@ -23,6 +23,7 @@ import { ChatPanel } from '@/components/ChatPanel';
 import { ParticipantsPanel } from '@/components/ParticipantsPanel';
 import { FloatingReactions } from '@/components/FloatingReactions';
 import { Lobby } from '@/components/Lobby';
+import { MiniCallWindow } from '@/components/MiniCallWindow';
 import { Info, Copy, Check } from 'lucide-react';
 
 const AVATAR_COLORS = [
@@ -77,6 +78,7 @@ export default function MeetingApp() {
   const [isParticipantsOpen, setIsParticipantsOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState<string>('');
   const [copiedLinkBanner, setCopiedLinkBanner] = useState(false);
+  const [pipTrigger, setPipTrigger] = useState(0);
 
   const webrtcManagerRef = useRef<PeerConnectionManager | null>(null);
 
@@ -115,7 +117,7 @@ export default function MeetingApp() {
   }, [floatingReactions]);
 
   // Handle joining room from Lobby
-  const handleJoinRoom = async (
+  const handleJoinRoom = (
     targetRoom: string,
     userName: string,
     initialAudioMuted: boolean,
@@ -131,55 +133,12 @@ export default function MeetingApp() {
     setIsVideoMuted(initialVideoMuted);
     setNotificationMessage(null);
     connectedPeersRef.current.clear();
+    setIsHost(Boolean(isNewRoom));
 
-    // If starting a brand new meeting, clean up any previous leftovers from that code
-    if (isNewRoom) {
-      setIsHost(true);
-      try {
-        await purgeRoomData(targetRoom);
-      } catch {
-        // ignore
-      }
-    }
+    // ⚡ INSTANT LAUNCH: Transition to conference view immediately
+    setIsInRoom(true);
 
-    // Get User Media
-    try {
-      const constraints: MediaStreamConstraints = {
-        audio: true,
-        video: selectedCameraId ? { deviceId: { exact: selectedCameraId } } : { facingMode: 'user' },
-      };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-
-      // Apply initial mute states to tracks
-      stream.getAudioTracks().forEach((t) => {
-        t.enabled = !initialAudioMuted;
-      });
-      stream.getVideoTracks().forEach((t) => {
-        t.enabled = !initialVideoMuted;
-      });
-
-      localStreamRef.current = stream;
-      setLocalStream(stream);
-
-      if (selectedCameraId) {
-        setActiveCameraId(selectedCameraId);
-      }
-    } catch {
-      // If mic/camera error, try audio-only or empty stream fallback
-      try {
-        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioStream.getAudioTracks().forEach((t) => {
-          t.enabled = !initialAudioMuted;
-        });
-        localStreamRef.current = audioStream;
-        setLocalStream(audioStream);
-        setIsVideoMuted(true);
-      } catch {
-        // Continue even without media
-      }
-    }
-
-    // Initialize WebRTC signaling
+    // Initialize WebRTC signaling manager immediately
     const rtc = new PeerConnectionManager(
       targetRoom,
       userId,
@@ -201,53 +160,105 @@ export default function MeetingApp() {
     );
 
     webrtcManagerRef.current = rtc;
-    if (localStreamRef.current) {
-      rtc.setLocalStream(localStreamRef.current);
-    }
     rtc.startListening();
 
-    // Register room document and host status
-    try {
-      const roomRef = doc(db, 'rooms', targetRoom);
-      const roomSnap = await getDoc(roomRef);
-      const roomData = roomSnap.data();
-      const userIsHost = Boolean(isNewRoom || !roomSnap.exists() || roomData?.status === 'ended' || roomData?.hostId === userId);
-      setIsHost(userIsHost);
-
-      await setDoc(
-        roomRef,
-        {
-          id: targetRoom,
-          title: `Sala ${targetRoom}`,
-          hostId: userIsHost ? userId : (roomData?.hostId || userId),
-          createdBy: userIsHost ? userId : (roomData?.createdBy || userId),
-          hostName: userIsHost ? userName : (roomData?.hostName || userName),
-          lastActive: Date.now(),
-          status: 'active',
-        },
-        { merge: true }
-      );
-    } catch {
-      // ignore
+    // 1. If starting a brand new meeting, clean up leftovers in background
+    if (isNewRoom) {
+      purgeRoomData(targetRoom).catch(() => {});
     }
 
-    // Register participant in Firestore
-    const randomColor = AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
-    const participantRef = doc(db, 'rooms', targetRoom, 'participants', userId);
-    await setDoc(participantRef, {
-      userId,
-      displayName: userName,
-      isAudioMuted: initialAudioMuted,
-      isVideoMuted: initialVideoMuted,
-      isScreenSharing: false,
-      isHandRaised: false,
-      joinedAt: Date.now(),
-      lastSeen: Date.now(),
-      role: isNewRoom ? 'host' : 'guest',
-      avatarColor: randomColor,
-    });
+    // 2. Concurrently get User Media without blocking room render
+    (async () => {
+      try {
+        const constraints: MediaStreamConstraints = {
+          audio: true,
+          video: selectedCameraId ? { deviceId: { exact: selectedCameraId } } : { facingMode: 'user' },
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
-    setIsInRoom(true);
+        // Apply initial mute states to tracks
+        stream.getAudioTracks().forEach((t) => {
+          t.enabled = !initialAudioMuted;
+        });
+        stream.getVideoTracks().forEach((t) => {
+          t.enabled = !initialVideoMuted;
+        });
+
+        localStreamRef.current = stream;
+        setLocalStream(stream);
+        rtc.setLocalStream(stream);
+
+        if (selectedCameraId) {
+          setActiveCameraId(selectedCameraId);
+        }
+      } catch {
+        // If mic/camera error, try audio-only or empty stream fallback
+        try {
+          const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          audioStream.getAudioTracks().forEach((t) => {
+            t.enabled = !initialAudioMuted;
+          });
+          localStreamRef.current = audioStream;
+          setLocalStream(audioStream);
+          rtc.setLocalStream(audioStream);
+          setIsVideoMuted(true);
+        } catch {
+          // Continue even without media
+        }
+      }
+    })();
+
+    // 3. Concurrently register room document and participant in Firestore
+    (async () => {
+      try {
+        const roomRef = doc(db, 'rooms', targetRoom);
+        let userIsHost = Boolean(isNewRoom);
+
+        if (!isNewRoom) {
+          try {
+            const roomSnap = await getDoc(roomRef);
+            const roomData = roomSnap.data();
+            userIsHost = Boolean(!roomSnap.exists() || roomData?.status === 'ended' || roomData?.hostId === userId);
+            setIsHost(userIsHost);
+          } catch {
+            // ignore
+          }
+        }
+
+        const randomColor = AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
+        const participantRef = doc(db, 'rooms', targetRoom, 'participants', userId);
+
+        await Promise.all([
+          setDoc(
+            roomRef,
+            {
+              id: targetRoom,
+              title: `Sala ${targetRoom}`,
+              hostId: userIsHost ? userId : userId,
+              createdBy: userIsHost ? userId : userId,
+              hostName: userName,
+              lastActive: Date.now(),
+              status: 'active',
+            },
+            { merge: true }
+          ),
+          setDoc(participantRef, {
+            userId,
+            displayName: userName,
+            isAudioMuted: initialAudioMuted,
+            isVideoMuted: initialVideoMuted,
+            isScreenSharing: false,
+            isHandRaised: false,
+            joinedAt: Date.now(),
+            lastSeen: Date.now(),
+            role: userIsHost ? 'host' : 'guest',
+            avatarColor: randomColor,
+          }),
+        ]);
+      } catch {
+        // ignore
+      }
+    })();
   };
 
   // Leave Call / Hangup
@@ -780,7 +791,22 @@ export default function MeetingApp() {
         onToggleParticipants={() => setIsParticipantsOpen(!isParticipantsOpen)}
         onLeaveCall={handleLeaveCall}
         onEndCallForEveryone={handleEndCallForEveryone}
+        onOpenPiP={() => setPipTrigger((prev) => prev + 1)}
         roomId={roomId}
+      />
+
+      {/* Mini Floating Window / Picture-in-Picture on PC */}
+      <MiniCallWindow
+        roomId={roomId}
+        isAudioMuted={isAudioMuted}
+        isVideoMuted={isVideoMuted}
+        participantsCount={allTiles.length}
+        displayName={displayName}
+        onToggleAudio={handleToggleAudio}
+        onToggleVideo={handleToggleVideo}
+        onLeaveCall={handleLeaveCall}
+        isInRoom={isInRoom}
+        openTrigger={pipTrigger}
       />
 
       {/* Slide-in Chat Panel */}

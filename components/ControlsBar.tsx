@@ -19,6 +19,7 @@ import {
   Info,
   LogOut,
   ChevronUp,
+  PictureInPicture2,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { sound } from '@/lib/sound';
@@ -46,6 +47,7 @@ interface ControlsBarProps {
   onToggleParticipants: () => void;
   onLeaveCall: () => void;
   onEndCallForEveryone?: () => void;
+  onOpenPiP?: () => void;
   roomId: string;
 }
 
@@ -73,6 +75,7 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
   onToggleParticipants,
   onLeaveCall,
   onEndCallForEveryone,
+  onOpenPiP,
   roomId,
 }) => {
   const [showReactionsMenu, setShowReactionsMenu] = useState(false);
@@ -275,6 +278,17 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
                 </button>
               )}
               <button
+                id="btn-more-open-pip"
+                onClick={() => {
+                  onOpenPiP?.();
+                  setShowMoreMenu(false);
+                }}
+                className="px-4 py-2.5 hover:bg-[#3c4043] flex items-center gap-3 text-left w-full cursor-pointer text-[#8ab4f8]"
+              >
+                <PictureInPicture2 className="w-4 h-4 text-[#8ab4f8]" />
+                <span>Mini janela no PC</span>
+              </button>
+              <button
                 onClick={() => {
                   handleCopyLink();
                   setShowMoreMenu(false);
@@ -377,8 +391,20 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
         </div>
       </div>
 
-      {/* Right Section: Info, Participants, Chat */}
+      {/* Right Section: PiP, Info, Participants, Chat */}
       <div className="flex items-center gap-1 text-[#e8eaed] shrink-0">
+        {/* Mini Window / PiP button */}
+        {onOpenPiP && (
+          <button
+            id="btn-trigger-pip"
+            onClick={onOpenPiP}
+            title="Abrir mini janela no PC (PiP)"
+            className="hidden sm:flex w-9 h-9 sm:w-10 sm:h-10 rounded-full items-center justify-center hover:bg-[#3c4043] text-[#e8eaed] hover:text-[#8ab4f8] transition-colors cursor-pointer"
+          >
+            <PictureInPicture2 className="w-4 h-4 sm:w-5 sm:h-5" />
+          </button>
+        )}
+
         {/* Info button */}
         <button
           id="btn-meeting-details-info"
