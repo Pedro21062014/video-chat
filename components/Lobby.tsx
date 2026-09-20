@@ -11,10 +11,13 @@ import {
   Keyboard,
   Shield,
   Volume2,
+  AlertCircle,
 } from 'lucide-react';
 import { sound } from '@/lib/sound';
+import { db } from '@/lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
 
-const DEFAULT_EXAMPLE_NAME = 'Maria Silva';
+const DEFAULT_PARTICIPANT_NAME = 'Participante';
 
 interface LobbyProps {
   initialRoomId?: string;
@@ -43,6 +46,7 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
   const [currentDateStr, setCurrentDateStr] = useState('');
   const [isCreatingMeeting, setIsCreatingMeeting] = useState(false);
   const [isJoiningMeeting, setIsJoiningMeeting] = useState(false);
+  const [roomError, setRoomError] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewStreamRef = useRef<MediaStream | null>(null);
@@ -208,18 +212,66 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
     if (isCreatingMeeting || isJoiningMeeting) return;
     setIsCreatingMeeting(true);
     const code = generateRoomCode();
-    const finalName = displayName.trim() || DEFAULT_EXAMPLE_NAME;
+    const finalName = displayName.trim() || DEFAULT_PARTICIPANT_NAME;
     sound.playJoin();
     onJoinRoom(code, finalName, isAudioMuted, isVideoMuted, selectedCameraId, true);
   };
 
-  const handleJoinExistingRoom = (e: React.FormEvent) => {
+  const handleJoinExistingRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!targetRoomId.trim() || isCreatingMeeting || isJoiningMeeting) return;
+    setRoomError(null);
     setIsJoiningMeeting(true);
-    const finalName = displayName.trim() || DEFAULT_EXAMPLE_NAME;
-    sound.playJoin();
-    onJoinRoom(targetRoomId.trim().toLowerCase(), finalName, isAudioMuted, isVideoMuted, selectedCameraId, false);
+
+    try {
+      // 1. Extract clean room code from text or URL
+      let cleanCode = targetRoomId.trim();
+      if (cleanCode.includes('room=')) {
+        try {
+          const url = new URL(cleanCode.startsWith('http') ? cleanCode : `https://${cleanCode}`);
+          cleanCode = url.searchParams.get('room') || cleanCode;
+        } catch {
+          const match = cleanCode.match(/room=([a-zA-Z0-9_-]+)/);
+          if (match) cleanCode = match[1];
+        }
+      }
+      cleanCode = cleanCode.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+
+      if (!cleanCode) {
+        setRoomError('Informe um código de reunião ou link válido.');
+        setIsJoiningMeeting(false);
+        return;
+      }
+
+      // 2. Query Firestore to verify room existence
+      const roomRef = doc(db, 'rooms', cleanCode);
+      const snap = await getDoc(roomRef);
+
+      if (!snap.exists()) {
+        setRoomError('Esta reunião não existe ou não foi encontrada. Verifique o código e tente novamente.');
+        sound.playHangup();
+        setIsJoiningMeeting(false);
+        return;
+      }
+
+      const roomData = snap.data();
+      if (roomData?.status === 'ended') {
+        setRoomError('Esta reunião já foi encerrada pelo organizador.');
+        sound.playHangup();
+        setIsJoiningMeeting(false);
+        return;
+      }
+
+      // 3. Valid room exists - proceed to join
+      const finalName = displayName.trim() || DEFAULT_PARTICIPANT_NAME;
+      sound.playJoin();
+      onJoinRoom(cleanCode, finalName, isAudioMuted, isVideoMuted, selectedCameraId, false);
+    } catch (err) {
+      console.error('Erro ao verificar sala:', err);
+      setRoomError('Não foi possível verificar a sala no momento. Tente novamente.');
+    } finally {
+      setIsJoiningMeeting(false);
+    }
   };
 
   return (
@@ -279,6 +331,20 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
             </div>
           )}
 
+          {/* Room Not Found / Error Banner */}
+          {roomError && (
+            <div
+              id="alert-room-not-found"
+              className="bg-[#ea4335]/15 border border-[#ea4335]/40 text-[#f28b82] px-4 py-3 rounded-lg text-sm flex items-start gap-2.5 max-w-md animate-fadeIn"
+            >
+              <AlertCircle className="w-4 h-4 text-[#ea4335] shrink-0 mt-0.5" />
+              <div className="flex flex-col">
+                <span className="font-medium text-white text-xs">Aviso de sala</span>
+                <span className="text-xs text-[#f28b82]">{roomError}</span>
+              </div>
+            </div>
+          )}
+
           {/* User Name Input */}
           <div className="flex flex-col gap-1.5 max-w-md">
             <label htmlFor="input-display-name" className="text-xs text-[#9aa0a6] font-medium">
@@ -289,7 +355,7 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
               type="text"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder={`Digite seu nome (ex: ${DEFAULT_EXAMPLE_NAME})`}
+              placeholder="Digite seu nome (opcional • padrão: Participante)"
               suppressHydrationWarning
               className="w-full bg-[#202124] border border-[#5f6368] focus:border-[#8ab4f8] rounded-md px-3.5 py-2.5 text-sm text-[#e8eaed] placeholder-[#80868b] focus:outline-none transition-colors"
             />
@@ -330,7 +396,10 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
                   id="input-room-code"
                   type="text"
                   value={targetRoomId}
-                  onChange={(e) => setTargetRoomId(e.target.value)}
+                  onChange={(e) => {
+                    setTargetRoomId(e.target.value);
+                    if (roomError) setRoomError(null);
+                  }}
                   placeholder="Digite um código ou link"
                   disabled={isCreatingMeeting || isJoiningMeeting}
                   className="w-full h-12 pl-10 pr-3.5 bg-transparent border border-[#5f6368] focus:border-[#8ab4f8] rounded-md text-sm text-[#e8eaed] placeholder-[#80868b] focus:outline-none transition-colors disabled:opacity-50"

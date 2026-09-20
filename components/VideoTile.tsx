@@ -1,14 +1,28 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Hand, Monitor, User, Pin, MoreVertical } from 'lucide-react';
-import { Participant } from '@/lib/types';
+import {
+  Mic,
+  MicOff,
+  Hand,
+  Monitor,
+  User,
+  Pin,
+  Sliders,
+  Video,
+  VideoOff,
+  MoreVertical,
+} from 'lucide-react';
+import { Participant, VideoQualityId } from '@/lib/types';
 
 interface VideoTileProps {
   participant: Participant;
   stream: MediaStream | null;
   isLocal: boolean;
   isSpeaking?: boolean;
+  onOpenSettings?: () => void;
+  onToggleVideo?: () => void;
+  currentQuality?: VideoQualityId;
 }
 
 export const VideoTile: React.FC<VideoTileProps> = ({
@@ -16,9 +30,35 @@ export const VideoTile: React.FC<VideoTileProps> = ({
   stream,
   isLocal,
   isSpeaking,
+  onOpenSettings,
+  onToggleVideo,
+  currentQuality,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [, setTrackState] = useState(0);
+  const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const touchTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Close context menu on outside click or scroll or escape
+  useEffect(() => {
+    if (!contextMenuPos) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setContextMenuPos(null);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenuPos(null);
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [contextMenuPos]);
 
   useEffect(() => {
     const videoEl = videoRef.current;
@@ -57,16 +97,66 @@ export const VideoTile: React.FC<VideoTileProps> = ({
     };
   }, [stream]);
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    if (!isLocal) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Prevent menu going offscreen
+    const menuWidth = 190;
+    const menuHeight = 105;
+    let x = e.clientX;
+    let y = e.clientY;
+
+    if (x + menuWidth > window.innerWidth) {
+      x = window.innerWidth - menuWidth - 10;
+    }
+    if (y + menuHeight > window.innerHeight) {
+      y = window.innerHeight - menuHeight - 10;
+    }
+
+    setContextMenuPos({ x: Math.max(10, x), y: Math.max(10, y) });
+  };
+
+  // Touch device long press support for mobile right-click experience
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (!isLocal) return;
+    const touch = e.touches[0];
+    const clientX = touch.clientX;
+    const clientY = touch.clientY;
+
+    touchTimerRef.current = setTimeout(() => {
+      let x = clientX;
+      let y = clientY;
+      const menuWidth = 190;
+      const menuHeight = 105;
+      if (x + menuWidth > window.innerWidth) x = window.innerWidth - menuWidth - 10;
+      if (y + menuHeight > window.innerHeight) y = window.innerHeight - menuHeight - 10;
+      setContextMenuPos({ x: Math.max(10, x), y: Math.max(10, y) });
+    }, 600);
+  };
+
+  const handleTouchEnd = () => {
+    if (touchTimerRef.current) {
+      clearTimeout(touchTimerRef.current);
+      touchTimerRef.current = null;
+    }
+  };
+
   const videoTracks = stream ? stream.getVideoTracks() : [];
   const activeVideoTrack = videoTracks.find((t) => t.readyState === 'live');
   const hasVideo = !participant.isVideoMuted && Boolean(activeVideoTrack);
 
   return (
     <div
+      ref={containerRef}
       id={`video-tile-${participant.userId}`}
+      onContextMenu={handleContextMenu}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
       className={`relative w-full h-full rounded-lg overflow-hidden bg-[#3c4043] transition-all duration-200 flex items-center justify-center group select-none shadow-md ${
         isSpeaking ? 'active-speaker' : 'border border-[#3c4043]/60'
-      }`}
+      } ${isLocal ? 'cursor-context-menu' : ''}`}
     >
       {/* Video Element */}
       <video
@@ -74,6 +164,11 @@ export const VideoTile: React.FC<VideoTileProps> = ({
         autoPlay
         playsInline
         muted={isLocal} // Always mute local
+        style={
+          isLocal && (currentQuality === '144p' || currentQuality === '240p')
+            ? { imageRendering: 'pixelated' }
+            : undefined
+        }
         className={`w-full h-full object-cover transition-opacity duration-200 ${
           hasVideo ? 'opacity-100' : 'opacity-0 absolute pointer-events-none'
         } ${isLocal && !participant.isScreenSharing ? 'scale-x-[-1]' : ''}`}
@@ -92,10 +187,15 @@ export const VideoTile: React.FC<VideoTileProps> = ({
               <User className="w-10 h-10 text-white" />
             )}
           </div>
+          {isLocal && (
+            <span className="text-xs text-[#9aa0a6] bg-[#202124]/70 px-2 py-0.5 rounded-full">
+              Clique com botão direito para opções
+            </span>
+          )}
         </div>
       )}
 
-      {/* Top Center Hover Action Buttons (Exact Google Meet tile hover) */}
+      {/* Top Center Hover Action Buttons */}
       <div className="absolute inset-x-0 top-3 flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-auto">
         <div className="bg-[#202124]/80 backdrop-blur-md px-2 py-1 rounded-full flex items-center gap-1 border border-[#5f6368]">
           <button
@@ -104,12 +204,22 @@ export const VideoTile: React.FC<VideoTileProps> = ({
           >
             <Pin className="w-3.5 h-3.5" />
           </button>
+          {isLocal && onOpenSettings && (
+            <button
+              id="btn-tile-camera-settings"
+              onClick={onOpenSettings}
+              title="Configurações da câmera"
+              className="p-1.5 rounded-full hover:bg-[#3c4043] text-white/90 hover:text-[#8ab4f8] transition-colors cursor-pointer"
+            >
+              <Sliders className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
       {/* Hand Raised Notification (Meet Top Left) */}
       {participant.isHandRaised && (
-        <div className="absolute top-3 left-3 bg-[#fbbc04] text-[#202124] font-medium px-2.5 py-1 rounded-full text-xs flex items-center gap-1.5 shadow-md">
+        <div className="absolute top-3 left-3 bg-[#fbbc04] text-[#202124] font-medium px-2.5 py-1 rounded-full text-xs flex items-center gap-1.5 shadow-md z-10">
           <Hand className="w-3.5 h-3.5 fill-[#202124]" />
           <span>Mão levantada</span>
         </div>
@@ -117,13 +227,24 @@ export const VideoTile: React.FC<VideoTileProps> = ({
 
       {/* Screen Sharing Tag */}
       {participant.isScreenSharing && (
-        <div className="absolute top-3 right-3 bg-[#8ab4f8] text-[#041e49] text-xs font-medium px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-md">
+        <div className="absolute top-3 right-3 bg-[#8ab4f8] text-[#041e49] text-xs font-medium px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-md z-10">
           <Monitor className="w-3.5 h-3.5" />
           <span>Apresentação</span>
         </div>
       )}
 
-      {/* Bottom Left Name Tag & Mic Icon (Exact Google Meet overlay) */}
+      {/* Local Video Quality Badge (Top Right when not presenting) */}
+      {isLocal && !participant.isScreenSharing && currentQuality && (
+        <button
+          onClick={onOpenSettings}
+          title="Clique para alterar qualidade de vídeo"
+          className="absolute top-3 right-3 bg-[#202124]/80 hover:bg-[#28292c] backdrop-blur-sm border border-[#3c4043] text-[11px] font-mono text-[#8ab4f8] px-2 py-0.5 rounded-md flex items-center gap-1 shadow z-10 transition-colors cursor-pointer"
+        >
+          <span>{currentQuality.toUpperCase()}</span>
+        </button>
+      )}
+
+      {/* Bottom Left Name Tag & Mic Icon */}
       <div className="absolute bottom-3 left-3 flex items-center gap-2 z-10 pointer-events-none">
         <div className="bg-[#202124]/75 backdrop-blur-sm px-2.5 py-1 rounded-md text-xs font-normal text-white flex items-center gap-2 shadow">
           <span className="truncate max-w-[180px]">
@@ -140,6 +261,59 @@ export const VideoTile: React.FC<VideoTileProps> = ({
           )}
         </div>
       </div>
+
+      {/* Right-click Context Menu for Local Camera Tile */}
+      {isLocal && contextMenuPos && (
+        <div
+          ref={menuRef}
+          id="camera-context-menu"
+          style={{
+            position: 'fixed',
+            left: `${contextMenuPos.x}px`,
+            top: `${contextMenuPos.y}px`,
+          }}
+          className="z-50 w-48 bg-[#28292c] border border-[#3c4043] py-1.5 rounded-xl shadow-2xl flex flex-col text-sm text-[#e8eaed] animate-fadeIn select-none"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Option 1: Configurações */}
+          <button
+            id="btn-context-settings"
+            type="button"
+            onClick={() => {
+              setContextMenuPos(null);
+              onOpenSettings?.();
+            }}
+            className="px-3.5 py-2 hover:bg-[#3c4043] flex items-center gap-2.5 text-left w-full cursor-pointer transition-colors text-[#e8eaed]"
+          >
+            <Sliders className="w-4 h-4 text-[#8ab4f8]" />
+            <span className="font-medium text-xs sm:text-sm">Configurações</span>
+          </button>
+
+          {/* Option 2: Desligar câmera / Ligar câmera */}
+          <button
+            id="btn-context-toggle-camera"
+            type="button"
+            onClick={() => {
+              setContextMenuPos(null);
+              onToggleVideo?.();
+            }}
+            className="px-3.5 py-2 hover:bg-[#3c4043] flex items-center gap-2.5 text-left w-full cursor-pointer transition-colors text-[#e8eaed]"
+          >
+            {participant.isVideoMuted ? (
+              <>
+                <Video className="w-4 h-4 text-[#81c995]" />
+                <span className="font-medium text-xs sm:text-sm">Ligar câmera</span>
+              </>
+            ) : (
+              <>
+                <VideoOff className="w-4 h-4 text-[#ea4335]" />
+                <span className="font-medium text-xs sm:text-sm text-[#f28b82]">Desligar câmera</span>
+              </>
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 };
+

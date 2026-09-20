@@ -9,6 +9,7 @@ import {
   deleteDoc,
   getDocs,
 } from 'firebase/firestore';
+import { VideoQualityOption } from './types';
 
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
@@ -26,6 +27,7 @@ export class PeerConnectionManager {
   private localUserId: string;
   private localStream: MediaStream | null = null;
   private screenStream: MediaStream | null = null;
+  private currentQualityOption: VideoQualityOption | null = null;
   private peerConnections: Map<string, RTCPeerConnection> = new Map();
   private remoteStreams: Map<string, MediaStream> = new Map();
   private pendingCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
@@ -46,22 +48,50 @@ export class PeerConnectionManager {
     this.onPeerDisconnectCallback = onPeerDisconnect;
   }
 
+  async applyVideoQuality(opt: VideoQualityOption) {
+    this.currentQualityOption = opt;
+    for (const [, pc] of this.peerConnections) {
+      const videoSender = pc.getSenders().find((s) => s.track?.kind === 'video');
+      if (!videoSender) continue;
+      try {
+        const params = videoSender.getParameters();
+        if (!params.encodings || params.encodings.length === 0) {
+          params.encodings = [{}];
+        }
+        params.encodings[0].maxBitrate = opt.bitrate;
+        params.encodings[0].maxFramerate = opt.frameRate;
+        if (opt.scaleResolutionDownBy > 1) {
+          params.encodings[0].scaleResolutionDownBy = opt.scaleResolutionDownBy;
+        } else {
+          delete params.encodings[0].scaleResolutionDownBy;
+        }
+        await videoSender.setParameters(params);
+      } catch (err) {
+        console.warn('Could not set encoding parameters on video sender:', err);
+      }
+    }
+  }
+
   setLocalStream(stream: MediaStream | null) {
     this.localStream = stream;
     // Update tracks in active peer connections
     this.peerConnections.forEach((pc) => {
       const senders = pc.getSenders();
       if (stream) {
-        stream.getTracks().forEach((track) => {
+        stream.getTracks().forEach(async (track) => {
           const sender = senders.find((s) => s.track?.kind === track.kind);
           if (sender) {
-            sender.replaceTrack(track);
+            await sender.replaceTrack(track);
           } else {
             pc.addTrack(track, stream);
           }
         });
       }
     });
+
+    if (this.currentQualityOption) {
+      this.applyVideoQuality(this.currentQualityOption).catch(() => {});
+    }
   }
 
   setScreenStream(screenStream: MediaStream | null) {
@@ -121,11 +151,43 @@ export class PeerConnectionManager {
     const activeStream = this.screenStream || this.localStream;
     if (activeStream) {
       activeStream.getTracks().forEach((track) => {
-        pc!.addTrack(track, activeStream);
+        const sender = pc!.addTrack(track, activeStream);
+        if (track.kind === 'video' && this.currentQualityOption) {
+          try {
+            const params = sender.getParameters();
+            if (!params.encodings || params.encodings.length === 0) {
+              params.encodings = [{}];
+            }
+            params.encodings[0].maxBitrate = this.currentQualityOption.bitrate;
+            params.encodings[0].maxFramerate = this.currentQualityOption.frameRate;
+            if (this.currentQualityOption.scaleResolutionDownBy > 1) {
+              params.encodings[0].scaleResolutionDownBy = this.currentQualityOption.scaleResolutionDownBy;
+            }
+            sender.setParameters(params);
+          } catch {
+            // ignore
+          }
+        }
       });
     } else if (this.localStream) {
       this.localStream.getTracks().forEach((track) => {
-        pc!.addTrack(track, this.localStream!);
+        const sender = pc!.addTrack(track, this.localStream!);
+        if (track.kind === 'video' && this.currentQualityOption) {
+          try {
+            const params = sender.getParameters();
+            if (!params.encodings || params.encodings.length === 0) {
+              params.encodings = [{}];
+            }
+            params.encodings[0].maxBitrate = this.currentQualityOption.bitrate;
+            params.encodings[0].maxFramerate = this.currentQualityOption.frameRate;
+            if (this.currentQualityOption.scaleResolutionDownBy > 1) {
+              params.encodings[0].scaleResolutionDownBy = this.currentQualityOption.scaleResolutionDownBy;
+            }
+            sender.setParameters(params);
+          } catch {
+            // ignore
+          }
+        }
       });
     }
 

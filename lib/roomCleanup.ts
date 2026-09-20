@@ -10,17 +10,11 @@ import { db } from './firebase';
 import { Participant } from './types';
 
 /**
- * Purges all transient data for a call room:
- * - messages (chat)
- * - reactions (emojis)
- * - signals (WebRTC signaling)
- * - participants (lingering participant records)
- *
- * PRESERVES room metadata in `rooms/{roomId}`:
- * - title, hostId, createdBy, hostName, createdAt
- * - marks status as 'ended', endedAt, lastActive, and clearedAt
+ * Clears only ephemeral subcollections (messages, reactions, signals, old participants)
+ * WITHOUT touching or altering the room's status.
+ * This is used when a new meeting starts or is reset, so it never prematurely ends a call.
  */
-export async function purgeRoomData(roomId: string): Promise<void> {
+export async function clearEphemeralRoomData(roomId: string): Promise<void> {
   if (!roomId) return;
 
   try {
@@ -32,7 +26,6 @@ export async function purgeRoomData(roomId: string): Promise<void> {
         const snapshot = await getDocs(colRef);
 
         if (!snapshot.empty) {
-          // Firestore batches support up to 500 operations
           let batch = writeBatch(db);
           let count = 0;
 
@@ -53,6 +46,27 @@ export async function purgeRoomData(roomId: string): Promise<void> {
         console.warn(`[RoomCleanup] Error clearing subcollection ${subcol}:`, subErr);
       }
     }
+  } catch (err) {
+    console.error(`[RoomCleanup] Failed to clear ephemeral data for room ${roomId}:`, err);
+  }
+}
+
+/**
+ * Purges all transient data for a call room and marks room as ended:
+ * - messages (chat)
+ * - reactions (emojis)
+ * - signals (WebRTC signaling)
+ * - participants (lingering participant records)
+ *
+ * PRESERVES room metadata in `rooms/{roomId}`:
+ * - title, hostId, createdBy, hostName, createdAt
+ * - marks status as 'ended', endedAt, lastActive, and clearedAt
+ */
+export async function purgeRoomData(roomId: string): Promise<void> {
+  if (!roomId) return;
+
+  try {
+    await clearEphemeralRoomData(roomId);
 
     // Preserve room document metadata while updating status to ended
     const roomRef = doc(db, 'rooms', roomId);
@@ -67,7 +81,7 @@ export async function purgeRoomData(roomId: string): Promise<void> {
       { merge: true }
     );
 
-    console.log(`[RoomCleanup] Successfully cleared all ephemeral data for room ${roomId}`);
+    console.log(`[RoomCleanup] Successfully cleared all ephemeral data and ended room ${roomId}`);
   } catch (err) {
     console.error(`[RoomCleanup] Failed to purge room ${roomId}:`, err);
   }

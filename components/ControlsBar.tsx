@@ -20,6 +20,7 @@ import {
   LogOut,
   ChevronUp,
   PictureInPicture2,
+  Sliders,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { sound } from '@/lib/sound';
@@ -48,6 +49,7 @@ interface ControlsBarProps {
   onLeaveCall: () => void;
   onEndCallForEveryone?: () => void;
   onOpenPiP?: () => void;
+  onOpenSettings?: () => void;
   roomId: string;
 }
 
@@ -76,6 +78,7 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
   onLeaveCall,
   onEndCallForEveryone,
   onOpenPiP,
+  onOpenSettings,
   roomId,
 }) => {
   const [showReactionsMenu, setShowReactionsMenu] = useState(false);
@@ -125,7 +128,7 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
     onSendReaction(emoji);
     setShowReactionsMenu(false);
 
-    if (emoji === '🎉' || emoji === '🔥') {
+    if (emoji === '🎉') {
       confetti({
         particleCount: 35,
         spread: 50,
@@ -265,6 +268,19 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
 
           {showMoreMenu && (
             <div className="absolute bottom-14 left-1/2 -translate-x-1/2 w-48 bg-[#28292c] border border-[#3c4043] py-2 rounded-lg shadow-2xl z-50 flex flex-col text-sm text-[#e8eaed]">
+              {onOpenSettings && (
+                <button
+                  id="btn-more-camera-settings"
+                  onClick={() => {
+                    onOpenSettings();
+                    setShowMoreMenu(false);
+                  }}
+                  className="px-4 py-2.5 hover:bg-[#3c4043] flex items-center gap-3 text-left w-full cursor-pointer text-[#8ab4f8]"
+                >
+                  <Sliders className="w-4 h-4 text-[#8ab4f8]" />
+                  <span>Configurações da câmera</span>
+                </button>
+              )}
               {availableCameras.length > 1 && (
                 <button
                   onClick={() => {

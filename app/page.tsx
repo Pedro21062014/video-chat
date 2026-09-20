@@ -13,10 +13,17 @@ import {
   deleteDoc,
   serverTimestamp,
 } from 'firebase/firestore';
-import { Participant, ChatMessage, FloatingReaction, RoomData } from '@/lib/types';
+import {
+  Participant,
+  ChatMessage,
+  FloatingReaction,
+  RoomData,
+  VIDEO_QUALITIES,
+  VideoQualityId,
+} from '@/lib/types';
 import { PeerConnectionManager } from '@/lib/webrtc';
 import { sound } from '@/lib/sound';
-import { purgeRoomData, checkAndCleanIfRoomEmpty } from '@/lib/roomCleanup';
+import { clearEphemeralRoomData, purgeRoomData, checkAndCleanIfRoomEmpty } from '@/lib/roomCleanup';
 import { VideoTile } from '@/components/VideoTile';
 import { ControlsBar } from '@/components/ControlsBar';
 import { ChatPanel } from '@/components/ChatPanel';
@@ -24,6 +31,7 @@ import { ParticipantsPanel } from '@/components/ParticipantsPanel';
 import { FloatingReactions } from '@/components/FloatingReactions';
 import { Lobby } from '@/components/Lobby';
 import { MiniCallWindow } from '@/components/MiniCallWindow';
+import { CameraSettingsModal } from '@/components/CameraSettingsModal';
 import { Info, Copy, Check } from 'lucide-react';
 
 const AVATAR_COLORS = [
@@ -60,6 +68,11 @@ export default function MeetingApp() {
   // Hardware devices
   const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
   const [activeCameraId, setActiveCameraId] = useState<string>('');
+
+  // Video Quality & Camera Settings
+  const [videoQuality, setVideoQuality] = useState<VideoQualityId>('720p');
+  const [isCameraSettingsOpen, setIsCameraSettingsOpen] = useState(false);
+  const meetingStartTimeRef = useRef<number>(0);
 
   // Media Streams
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -116,6 +129,105 @@ export default function MeetingApp() {
     return () => clearTimeout(timer);
   }, [floatingReactions]);
 
+  // Change video quality dynamically and apply to live track & peer connections
+  const handleChangeVideoQuality = async (newQuality: VideoQualityId) => {
+    setVideoQuality(newQuality);
+    const targetOpt = VIDEO_QUALITIES.find((q) => q.id === newQuality) || VIDEO_QUALITIES[2];
+
+    const videoTrackConstraints: MediaTrackConstraints = {
+      ...(activeCameraId ? { deviceId: { exact: activeCameraId } } : { facingMode: 'user' }),
+      width: { ideal: targetOpt.width, max: targetOpt.width },
+      height: { ideal: targetOpt.height, max: targetOpt.height },
+      frameRate: { ideal: targetOpt.frameRate, max: targetOpt.frameRate },
+    };
+
+    try {
+      let appliedDirectly = false;
+      if (localStreamRef.current) {
+        const activeTrack = localStreamRef.current.getVideoTracks()[0];
+        if (activeTrack && activeTrack.readyState === 'live') {
+          try {
+            await activeTrack.applyConstraints(videoTrackConstraints);
+            const s = activeTrack.getSettings();
+            if (s.width && s.width <= targetOpt.width * 1.15) {
+              appliedDirectly = true;
+            }
+          } catch {
+            appliedDirectly = false;
+          }
+        }
+      }
+
+      if (!appliedDirectly) {
+        const freshStream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: videoTrackConstraints,
+        });
+        const newVideoTrack = freshStream.getVideoTracks()[0];
+        newVideoTrack.enabled = !isVideoMuted;
+
+        if (localStreamRef.current) {
+          const oldTrack = localStreamRef.current.getVideoTracks()[0];
+          if (oldTrack) {
+            localStreamRef.current.removeTrack(oldTrack);
+            oldTrack.stop();
+          }
+          localStreamRef.current.addTrack(newVideoTrack);
+        }
+      }
+
+      if (localStreamRef.current) {
+        if (webrtcManagerRef.current) {
+          webrtcManagerRef.current.setLocalStream(localStreamRef.current);
+          await webrtcManagerRef.current.applyVideoQuality(targetOpt);
+        }
+        setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+      }
+    } catch (err) {
+      console.error('[VideoQuality] Error applying quality constraints:', err);
+      if (webrtcManagerRef.current) {
+        await webrtcManagerRef.current.applyVideoQuality(targetOpt);
+      }
+    }
+  };
+
+  // Change camera device and preserve video quality settings
+  const handleChangeCamera = async (deviceId: string) => {
+    setActiveCameraId(deviceId);
+    const targetOpt = VIDEO_QUALITIES.find((q) => q.id === videoQuality) || VIDEO_QUALITIES[2];
+
+    try {
+      const constraints: MediaStreamConstraints = {
+        audio: false,
+        video: {
+          deviceId: { exact: deviceId },
+          width: { ideal: targetOpt.width, max: targetOpt.width },
+          height: { ideal: targetOpt.height, max: targetOpt.height },
+          frameRate: { ideal: targetOpt.frameRate, max: targetOpt.frameRate },
+        },
+      };
+      const freshStream = await navigator.mediaDevices.getUserMedia(constraints);
+      const newVideoTrack = freshStream.getVideoTracks()[0];
+      newVideoTrack.enabled = !isVideoMuted;
+
+      if (localStreamRef.current) {
+        const oldTrack = localStreamRef.current.getVideoTracks()[0];
+        if (oldTrack) {
+          localStreamRef.current.removeTrack(oldTrack);
+          oldTrack.stop();
+        }
+        localStreamRef.current.addTrack(newVideoTrack);
+        if (webrtcManagerRef.current) {
+          webrtcManagerRef.current.setLocalStream(localStreamRef.current);
+          await webrtcManagerRef.current.applyVideoQuality(targetOpt);
+        }
+        setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+      }
+    } catch (err) {
+      console.error('[Camera] Error changing camera device:', err);
+    }
+  };
+
   // Handle joining room from Lobby
   const handleJoinRoom = (
     targetRoom: string,
@@ -125,9 +237,11 @@ export default function MeetingApp() {
     selectedCameraId?: string,
     isNewRoom?: boolean
   ) => {
+    const finalName = (userName && userName.trim()) || 'Participante';
     const userId = 'user_' + Math.random().toString(36).substring(2, 9);
+    meetingStartTimeRef.current = Date.now();
     setCurrentUserId(userId);
-    setDisplayName(userName);
+    setDisplayName(finalName);
     setRoomId(targetRoom);
     setIsAudioMuted(initialAudioMuted);
     setIsVideoMuted(initialVideoMuted);
@@ -162,17 +276,23 @@ export default function MeetingApp() {
     webrtcManagerRef.current = rtc;
     rtc.startListening();
 
-    // 1. If starting a brand new meeting, clean up leftovers in background
+    // 1. If starting a brand new meeting, clean up ephemeral leftovers WITHOUT setting status: 'ended'
     if (isNewRoom) {
-      purgeRoomData(targetRoom).catch(() => {});
+      clearEphemeralRoomData(targetRoom).catch(() => {});
     }
 
-    // 2. Concurrently get User Media without blocking room render
+    // 2. Concurrently get User Media with chosen quality without blocking room render
     (async () => {
       try {
+        const targetOpt = VIDEO_QUALITIES.find((q) => q.id === videoQuality) || VIDEO_QUALITIES[2];
         const constraints: MediaStreamConstraints = {
           audio: true,
-          video: selectedCameraId ? { deviceId: { exact: selectedCameraId } } : { facingMode: 'user' },
+          video: {
+            ...(selectedCameraId ? { deviceId: { exact: selectedCameraId } } : { facingMode: 'user' }),
+            width: { ideal: targetOpt.width },
+            height: { ideal: targetOpt.height },
+            frameRate: { ideal: targetOpt.frameRate },
+          },
         };
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
@@ -236,15 +356,16 @@ export default function MeetingApp() {
               title: `Sala ${targetRoom}`,
               hostId: userIsHost ? userId : userId,
               createdBy: userIsHost ? userId : userId,
-              hostName: userName,
+              hostName: finalName,
               lastActive: Date.now(),
               status: 'active',
+              endedAt: null, // Clear any past endedAt
             },
             { merge: true }
           ),
           setDoc(participantRef, {
             userId,
-            displayName: userName,
+            displayName: finalName,
             isAudioMuted: initialAudioMuted,
             isVideoMuted: initialVideoMuted,
             isScreenSharing: false,
@@ -353,7 +474,7 @@ export default function MeetingApp() {
     return () => clearInterval(interval);
   }, [isInRoom, roomId, currentUserId]);
 
-  // Cleanup on window/tab close (beforeunload / pagehide)
+  // Cleanup on window/tab close (beforeunload only)
   useEffect(() => {
     if (!isInRoom || !roomId || !currentUserId) return;
 
@@ -367,11 +488,9 @@ export default function MeetingApp() {
     };
 
     window.addEventListener('beforeunload', handleUnload);
-    window.addEventListener('pagehide', handleUnload);
 
     return () => {
       window.removeEventListener('beforeunload', handleUnload);
-      window.removeEventListener('pagehide', handleUnload);
     };
   }, [isInRoom, roomId, currentUserId]);
 
@@ -385,9 +504,12 @@ export default function MeetingApp() {
       if (snapshot.exists()) {
         const data = snapshot.data();
         if (data.status === 'ended') {
-          sound.playHangup();
-          setNotificationMessage('A reunião foi encerrada pelo organizador.');
-          handleLeaveCallRef.current();
+          // Only auto-end if endedAt was explicitly set and occurred after this meeting session started
+          if (data.endedAt && data.endedAt > meetingStartTimeRef.current) {
+            sound.playHangup();
+            setNotificationMessage('A reunião foi encerrada pelo organizador.');
+            handleLeaveCallRef.current();
+          }
         } else if (data.hostId === currentUserId) {
           setIsHost(true);
         }
@@ -757,6 +879,9 @@ export default function MeetingApp() {
             stream={stream}
             isLocal={isLocal}
             isSpeaking={!participant.isAudioMuted}
+            onOpenSettings={isLocal ? () => setIsCameraSettingsOpen(true) : undefined}
+            onToggleVideo={isLocal ? handleToggleVideo : undefined}
+            currentQuality={isLocal ? videoQuality : undefined}
           />
         ))}
       </main>
@@ -792,7 +917,22 @@ export default function MeetingApp() {
         onLeaveCall={handleLeaveCall}
         onEndCallForEveryone={handleEndCallForEveryone}
         onOpenPiP={() => setPipTrigger((prev) => prev + 1)}
+        onOpenSettings={() => setIsCameraSettingsOpen(true)}
         roomId={roomId}
+      />
+
+      {/* Camera & Video Quality Settings Modal */}
+      <CameraSettingsModal
+        isOpen={isCameraSettingsOpen}
+        onClose={() => setIsCameraSettingsOpen(false)}
+        currentQuality={videoQuality}
+        onChangeQuality={handleChangeVideoQuality}
+        availableCameras={availableCameras}
+        activeCameraId={activeCameraId}
+        onChangeCamera={handleChangeCamera}
+        isVideoMuted={isVideoMuted}
+        onToggleVideo={handleToggleVideo}
+        localStream={localStream}
       />
 
       {/* Mini Floating Window / Picture-in-Picture on PC */}
