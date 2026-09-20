@@ -1,6 +1,6 @@
 {
   "name": "VideoMeet",
-  "description": "Aplicativo moderno de videochamadas com WebRTC P2P criptografado, salas instantâneas sem login, compartilhamento de tela, chat, reações e efeitos sonoros.",
+  "description": "Aplicativo moderno de videochamadas com PeerJS P2P criptografado, salas instantâneas sem login, compartilhamento de tela, chat, reações, efeitos sonoros e deploy compatível com Cloudflare Pages.",
   "requestFramePermissions": [
     "camera",
     "microphone"

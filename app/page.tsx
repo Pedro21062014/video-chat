@@ -36,6 +36,11 @@ import { WhatsAppTwoPartyView } from '@/components/WhatsAppTwoPartyView';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { AudioActivityDetector } from '@/lib/audioDetector';
+import {
+  registerCallSession,
+  sendCallHeartbeat,
+  leaveCallSession,
+} from '@/lib/callsLimit';
 import { Info, Copy, Check, LayoutGrid, Volume2, UserCheck, Sparkles } from 'lucide-react';
 
 const AVATAR_COLORS = [
@@ -115,11 +120,7 @@ export default function MeetingApp() {
         const lastActiveUser = sessionStorage.getItem('active_call_user');
         if (lastActiveRoom && lastActiveUser) {
           deleteDoc(doc(db, 'rooms', lastActiveRoom, 'participants', lastActiveUser)).catch(() => {});
-          fetch('/api/calls-limit', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'leave', roomId: lastActiveRoom, userId: lastActiveUser }),
-          }).catch(() => {});
+          leaveCallSession(lastActiveRoom, lastActiveUser).catch(() => {});
         }
         sessionStorage.removeItem('active_call_room');
         sessionStorage.removeItem('active_call_user');
@@ -300,11 +301,7 @@ export default function MeetingApp() {
     if (typeof window !== 'undefined') {
       sessionStorage.setItem('active_call_room', targetRoom);
       sessionStorage.setItem('active_call_user', userId);
-      fetch('/api/calls-limit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'join', roomId: targetRoom, userId, isNewRoom: Boolean(isNewRoom) }),
-      }).catch(() => {});
+      registerCallSession(targetRoom, userId, Boolean(isNewRoom)).catch(() => {});
     }
 
     // ⚡ INSTANT LAUNCH: Transition to conference view immediately
@@ -577,15 +574,11 @@ export default function MeetingApp() {
     setIsChatOpen(false);
     setIsParticipantsOpen(false);
 
-    // Release IP call limiter slot
+    // Release call limiter session
     if (typeof window !== 'undefined') {
       sessionStorage.removeItem('active_call_room');
       sessionStorage.removeItem('active_call_user');
-      fetch('/api/calls-limit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'leave', roomId: targetRoomId, userId: leavingUserId }),
-      }).catch(() => {});
+      leaveCallSession(targetRoomId, leavingUserId).catch(() => {});
     }
 
     // Remove user participant from Firestore.
@@ -633,12 +626,8 @@ export default function MeetingApp() {
         const pRef = doc(db, 'rooms', roomId, 'participants', currentUserId);
         await setDoc(pRef, { lastSeen: Date.now() }, { merge: true });
 
-        // Heartbeat to IP call limit
-        fetch('/api/calls-limit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'heartbeat', roomId, userId: currentUserId }),
-        }).catch(() => {});
+        // Heartbeat to call limit session
+        sendCallHeartbeat(roomId, currentUserId).catch(() => {});
       } catch {
         // ignore
       }
@@ -652,8 +641,7 @@ export default function MeetingApp() {
 
     const handleUnload = () => {
       try {
-        const payload = JSON.stringify({ action: 'leave', roomId, userId: currentUserId });
-        navigator.sendBeacon('/api/calls-limit', payload);
+        leaveCallSession(roomId, currentUserId).catch(() => {});
       } catch {
         // ignore
       }

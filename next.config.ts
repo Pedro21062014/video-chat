@@ -1,6 +1,9 @@
 import type {NextConfig} from 'next';
 
+const isExport = process.env.OUTPUT_EXPORT === 'true' || process.env.CF_PAGES === '1';
+
 const nextConfig: NextConfig = {
+  output: isExport ? 'export' : undefined,
   reactStrictMode: true,
   eslint: {
     ignoreDuringBuilds: true,
@@ -10,6 +13,7 @@ const nextConfig: NextConfig = {
   },
   // Allow access to remote image placeholder.
   images: {
+    unoptimized: isExport ? true : undefined,
     remotePatterns: [
       {
         protocol: 'https',

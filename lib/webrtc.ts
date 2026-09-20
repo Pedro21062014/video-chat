@@ -1,41 +1,35 @@
-import { db } from './firebase';
-import {
-  collection,
-  doc,
-  setDoc,
-  onSnapshot,
-  query,
-  where,
-  deleteDoc,
-  getDocs,
-} from 'firebase/firestore';
+import Peer, { type MediaConnection } from 'peerjs';
 import { VideoQualityOption } from './types';
 
-const RTC_CONFIG: RTCConfiguration = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    { urls: 'stun:stun4.l.google.com:19302' },
-    { urls: 'stun:stun.cloudflare.com:3478' },
-  ],
-  iceCandidatePoolSize: 10,
-};
+export function formatPeerId(roomId: string, userId: string): string {
+  const cleanRoom = roomId.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+  const cleanUser = userId.replace(/[^a-zA-Z0-9_-]/g, '');
+  return `vm--${cleanRoom}--${cleanUser}`;
+}
+
+export function parseUserIdFromPeerId(peerId: string): string {
+  const parts = peerId.split('--');
+  if (parts.length >= 3) {
+    return parts.slice(2).join('--');
+  }
+  return peerId;
+}
 
 export class PeerConnectionManager {
   private roomId: string;
   private localUserId: string;
+  private peerId: string;
+  private peer: Peer | null = null;
   private localStream: MediaStream | null = null;
   private screenStream: MediaStream | null = null;
+  private fallbackStream: MediaStream | null = null;
   private currentQualityOption: VideoQualityOption | null = null;
-  private peerConnections: Map<string, RTCPeerConnection> = new Map();
+  private activeCalls: Map<string, MediaConnection> = new Map();
   private remoteStreams: Map<string, MediaStream> = new Map();
-  private pendingCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
   private onRemoteStreamCallback?: (peerId: string, stream: MediaStream) => void;
   private onPeerDisconnectCallback?: (peerId: string) => void;
-  private unsubscribeSignals?: () => void;
-  private processedSignals = new Set<string>();
+  private isListening: boolean = false;
+  private callRetryTimers: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(
     roomId: string,
@@ -45,13 +39,265 @@ export class PeerConnectionManager {
   ) {
     this.roomId = roomId;
     this.localUserId = localUserId;
+    this.peerId = formatPeerId(roomId, localUserId);
     this.onRemoteStreamCallback = onRemoteStream;
     this.onPeerDisconnectCallback = onPeerDisconnect;
   }
 
+  private getFallbackStream(): MediaStream {
+    if (this.fallbackStream) return this.fallbackStream;
+    if (typeof window !== 'undefined') {
+      try {
+        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          const osc = ctx.createOscillator();
+          const dst = ctx.createMediaStreamDestination();
+          osc.connect(dst);
+          osc.start();
+          const track = dst.stream.getAudioTracks()[0];
+          if (track) {
+            track.enabled = false;
+            this.fallbackStream = new MediaStream([track]);
+            return this.fallbackStream;
+          }
+        }
+      } catch {
+        // ignore
+      }
+      this.fallbackStream = new MediaStream();
+      return this.fallbackStream;
+    }
+    return new MediaStream();
+  }
+
+  startListening() {
+    if (typeof window === 'undefined' || this.isListening) return;
+    this.isListening = true;
+
+    try {
+      const peerOptions: Record<string, unknown> = {
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:stun3.l.google.com:19302' },
+            { urls: 'stun:stun.cloudflare.com:3478' },
+          ],
+          iceCandidatePoolSize: 10,
+        },
+        debug: 1,
+      };
+
+      if (process.env.NEXT_PUBLIC_PEERJS_HOST) {
+        peerOptions.host = process.env.NEXT_PUBLIC_PEERJS_HOST;
+      }
+      if (process.env.NEXT_PUBLIC_PEERJS_PORT) {
+        peerOptions.port = Number(process.env.NEXT_PUBLIC_PEERJS_PORT);
+      }
+      if (process.env.NEXT_PUBLIC_PEERJS_PATH) {
+        peerOptions.path = process.env.NEXT_PUBLIC_PEERJS_PATH;
+      }
+      if (process.env.NEXT_PUBLIC_PEERJS_KEY) {
+        peerOptions.key = process.env.NEXT_PUBLIC_PEERJS_KEY;
+      }
+      if (process.env.NEXT_PUBLIC_PEERJS_SECURE !== undefined) {
+        peerOptions.secure = process.env.NEXT_PUBLIC_PEERJS_SECURE === 'true';
+      }
+
+      const peer = new Peer(this.peerId, peerOptions);
+      this.peer = peer;
+
+      peer.on('open', (id) => {
+        console.info(`[PeerJS] Initialized and registered with ID: ${id}`);
+      });
+
+      peer.on('call', (call) => {
+        this.handleIncomingCall(call);
+      });
+
+      peer.on('disconnected', () => {
+        console.info('[PeerJS] Disconnected from signaling server. Reconnecting...');
+        if (peer && !peer.destroyed) {
+          try {
+            peer.reconnect();
+          } catch {
+            // ignore
+          }
+        }
+      });
+
+      peer.on('error', (err: unknown) => {
+        const error = err as { type?: string; message?: string };
+        if (error?.type === 'peer-unavailable') {
+          console.info('[PeerJS] Peer is not yet available, will connect when ready.');
+        } else {
+          console.warn('[PeerJS] Notice:', error?.message || error);
+        }
+      });
+    } catch (err) {
+      console.error('[PeerJS] Failed to initialize peer:', err);
+    }
+  }
+
+  private handleIncomingCall(call: MediaConnection) {
+    const meta = call.metadata as { fromUserId?: string } | undefined;
+    const remoteUserId = meta?.fromUserId || parseUserIdFromPeerId(call.peer);
+    if (!remoteUserId || remoteUserId === this.localUserId) return;
+
+    // Replace previous call if already exists
+    const existing = this.activeCalls.get(remoteUserId);
+    if (existing && existing !== call) {
+      try {
+        existing.close();
+      } catch {
+        // ignore
+      }
+    }
+
+    this.activeCalls.set(remoteUserId, call);
+
+    const streamToSend = this.screenStream || this.localStream || this.getFallbackStream();
+    call.answer(streamToSend);
+
+    this.bindCallEvents(remoteUserId, call);
+  }
+
+  async connectToPeer(targetUserId: string) {
+    if (targetUserId === this.localUserId) return;
+    if (!this.peer || this.peer.destroyed) return;
+
+    const existing = this.activeCalls.get(targetUserId);
+    if (existing && existing.open) {
+      return;
+    }
+
+    const targetPeerId = formatPeerId(this.roomId, targetUserId);
+    const streamToSend = this.screenStream || this.localStream || this.getFallbackStream();
+
+    try {
+      const call = this.peer.call(targetPeerId, streamToSend, {
+        metadata: { fromUserId: this.localUserId, roomId: this.roomId },
+      });
+
+      if (!call) return;
+
+      this.activeCalls.set(targetUserId, call);
+      this.bindCallEvents(targetUserId, call);
+    } catch (err) {
+      console.warn(`[PeerJS] Failed to call peer ${targetUserId}:`, err);
+    }
+  }
+
+  private bindCallEvents(remoteUserId: string, call: MediaConnection) {
+    call.on('stream', (remoteStream: MediaStream) => {
+      const updated = new MediaStream(remoteStream.getTracks());
+      this.remoteStreams.set(remoteUserId, updated);
+
+      remoteStream.getTracks().forEach((track) => {
+        const notify = () => {
+          const s = this.remoteStreams.get(remoteUserId);
+          if (s && this.onRemoteStreamCallback) {
+            this.onRemoteStreamCallback(remoteUserId, new MediaStream(s.getTracks()));
+          }
+        };
+        track.addEventListener('unmute', notify);
+        track.addEventListener('ended', notify);
+      });
+
+      if (this.onRemoteStreamCallback) {
+        this.onRemoteStreamCallback(remoteUserId, updated);
+      }
+    });
+
+    call.on('close', () => {
+      this.activeCalls.delete(remoteUserId);
+      this.remoteStreams.delete(remoteUserId);
+      if (this.onPeerDisconnectCallback) {
+        this.onPeerDisconnectCallback(remoteUserId);
+      }
+    });
+
+    call.on('error', (err) => {
+      console.warn(`[PeerJS] Call error with peer ${remoteUserId}:`, err);
+    });
+
+    const pc = call.peerConnection;
+    if (pc) {
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
+          setTimeout(() => {
+            if (pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
+              this.activeCalls.delete(remoteUserId);
+              this.remoteStreams.delete(remoteUserId);
+              if (this.onPeerDisconnectCallback) {
+                this.onPeerDisconnectCallback(remoteUserId);
+              }
+            }
+          }, 3000);
+        }
+      };
+    }
+
+    if (this.currentQualityOption) {
+      this.applyVideoQuality(this.currentQualityOption).catch(() => {});
+    }
+  }
+
+  async setLocalStream(stream: MediaStream | null) {
+    this.localStream = stream;
+    if (!stream) return;
+
+    const videoTrack = stream.getVideoTracks()[0] || null;
+    const audioTrack = stream.getAudioTracks()[0] || null;
+
+    for (const [, call] of this.activeCalls) {
+      const pc = call.peerConnection;
+      if (!pc || pc.connectionState === 'closed') continue;
+
+      try {
+        const senders = pc.getSenders();
+        for (const sender of senders) {
+          if (sender.track?.kind === 'video' && videoTrack && !this.screenStream) {
+            await sender.replaceTrack(videoTrack);
+          } else if (sender.track?.kind === 'audio' && audioTrack) {
+            await sender.replaceTrack(audioTrack);
+          }
+        }
+      } catch (err) {
+        console.warn('[PeerJS] Could not replace local track on sender:', err);
+      }
+    }
+
+    if (this.currentQualityOption) {
+      this.applyVideoQuality(this.currentQualityOption).catch(() => {});
+    }
+  }
+
+  setScreenStream(screenStream: MediaStream | null) {
+    this.screenStream = screenStream;
+    const activeStream = screenStream || this.localStream;
+    if (!activeStream) return;
+
+    const videoTrack = activeStream.getVideoTracks()[0] || null;
+    if (videoTrack) {
+      for (const [, call] of this.activeCalls) {
+        const pc = call.peerConnection;
+        if (!pc || pc.connectionState === 'closed') continue;
+        const videoSender = pc.getSenders().find((s) => s.track?.kind === 'video');
+        if (videoSender) {
+          videoSender.replaceTrack(videoTrack).catch(() => {});
+        }
+      }
+    }
+  }
+
   async applyVideoQuality(opt: VideoQualityOption) {
     this.currentQualityOption = opt;
-    for (const [, pc] of this.peerConnections) {
+    for (const [, call] of this.activeCalls) {
+      const pc = call.peerConnection;
+      if (!pc || pc.connectionState === 'closed') continue;
       const videoSender = pc.getSenders().find((s) => s.track?.kind === 'video');
       if (!videoSender) continue;
       try {
@@ -68,361 +314,36 @@ export class PeerConnectionManager {
         }
         await videoSender.setParameters(params);
       } catch (err) {
-        console.warn('Could not set encoding parameters on video sender:', err);
+        console.warn('[PeerJS] Could not set video encoding parameters:', err);
       }
-    }
-  }
-
-  async setLocalStream(stream: MediaStream | null) {
-    this.localStream = stream;
-    if (!stream) return;
-
-    // Update tracks in all active peer connections
-    for (const [peerId, pc] of this.peerConnections) {
-      if (pc.connectionState === 'closed') continue;
-
-      let renegNeeded = false;
-
-      for (const track of stream.getTracks()) {
-        const transceiver = pc.getTransceivers().find(
-          (t) => t.sender.track?.kind === track.kind || t.receiver?.track?.kind === track.kind
-        );
-        if (transceiver) {
-          try {
-            await transceiver.sender.replaceTrack(track);
-            transceiver.direction = 'sendrecv';
-          } catch {
-            // fallback
-          }
-        } else {
-          try {
-            pc.addTrack(track, stream);
-            renegNeeded = true;
-          } catch {
-            // ignore
-          }
-        }
-      }
-
-      // If new tracks were added and peer connection is stable, renegotiate
-      if (renegNeeded && pc.signalingState === 'stable') {
-        this.connectToPeer(peerId).catch(() => {});
-      }
-    }
-
-    if (this.currentQualityOption) {
-      this.applyVideoQuality(this.currentQualityOption).catch(() => {});
-    }
-  }
-
-  setScreenStream(screenStream: MediaStream | null) {
-    this.screenStream = screenStream;
-    const activeStream = screenStream || this.localStream;
-    if (!activeStream) return;
-
-    const videoTrack = activeStream.getVideoTracks()[0];
-    if (videoTrack) {
-      this.peerConnections.forEach((pc) => {
-        const videoSender = pc.getSenders().find((s) => s.track?.kind === 'video');
-        if (videoSender) {
-          videoSender.replaceTrack(videoTrack).catch(() => {});
-        }
-      });
-    }
-  }
-
-  // Start listening to incoming WebRTC signals
-  startListening() {
-    const signalsRef = collection(db, 'rooms', this.roomId, 'signals');
-    const q = query(signalsRef, where('to', '==', this.localUserId));
-
-    this.unsubscribeSignals = onSnapshot(q, (snapshot) => {
-      snapshot.docChanges().forEach(async (change) => {
-        if (change.type === 'added') {
-          const docId = change.doc.id;
-          if (this.processedSignals.has(docId)) return;
-          this.processedSignals.add(docId);
-
-          const data = change.doc.data();
-          const { from, type, payload, timestamp } = data;
-
-          // Discard stale signals from old sessions (older than 5 minutes)
-          if (timestamp && Date.now() - timestamp > 300000) {
-            try {
-              await deleteDoc(doc(signalsRef, docId));
-            } catch {
-              // ignore
-            }
-            return;
-          }
-
-          await this.handleIncomingSignal(from, type, payload);
-
-          // Clean up consumed signal
-          try {
-            await deleteDoc(doc(signalsRef, docId));
-          } catch {
-            // ignore
-          }
-        }
-      });
-    });
-  }
-
-  private async getOrCreatePeer(peerId: string): Promise<RTCPeerConnection> {
-    let pc = this.peerConnections.get(peerId);
-    if (pc && pc.connectionState !== 'closed') {
-      return pc;
-    }
-
-    pc = new RTCPeerConnection(RTC_CONFIG);
-    this.peerConnections.set(peerId, pc);
-
-    // Pre-allocate transceivers in sendrecv mode so SDP offer/answer negotiates audio & video upfront
-    // even if mobile camera/mic hardware takes a few moments to finish opening!
-    try {
-      if (pc.getTransceivers().length === 0) {
-        pc.addTransceiver('audio', { direction: 'sendrecv' });
-        pc.addTransceiver('video', { direction: 'sendrecv' });
-      }
-    } catch {
-      // ignore
-    }
-
-    // Attach local tracks if already available
-    const activeStream = this.screenStream || this.localStream;
-    if (activeStream) {
-      for (const track of activeStream.getTracks()) {
-        const transceiver = pc.getTransceivers().find(
-          (t) => t.sender.track?.kind === track.kind || t.receiver?.track?.kind === track.kind
-        );
-        if (transceiver) {
-          transceiver.sender.replaceTrack(track).catch(() => {});
-          transceiver.direction = 'sendrecv';
-        } else {
-          try {
-            pc.addTrack(track, activeStream);
-          } catch {
-            // ignore
-          }
-        }
-      }
-    }
-
-    // Handle ICE candidates
-    pc.onicecandidate = async (event) => {
-      if (event.candidate) {
-        await this.sendSignal(peerId, 'candidate', JSON.stringify(event.candidate));
-      }
-    };
-
-    // Handle remote track
-    pc.ontrack = (event) => {
-      let stream = this.remoteStreams.get(peerId);
-      if (!stream) {
-        stream = new MediaStream();
-        this.remoteStreams.set(peerId, stream);
-      }
-
-      const updateCallback = () => {
-        const curStream = this.remoteStreams.get(peerId);
-        if (curStream && this.onRemoteStreamCallback) {
-          this.onRemoteStreamCallback(peerId, new MediaStream(curStream.getTracks()));
-        }
-      };
-
-      if (event.streams && event.streams[0]) {
-        event.streams[0].getTracks().forEach((track) => {
-          if (!stream!.getTracks().some((t) => t.id === track.id)) {
-            stream!.addTrack(track);
-            track.addEventListener('unmute', updateCallback);
-            track.addEventListener('ended', updateCallback);
-          }
-        });
-      } else if (event.track) {
-        if (!stream.getTracks().some((t) => t.id === event.track.id)) {
-          stream.addTrack(event.track);
-          event.track.addEventListener('unmute', updateCallback);
-          event.track.addEventListener('ended', updateCallback);
-        }
-      }
-
-      // Clone a fresh stream reference with current tracks to trigger React state updates reliably
-      const updatedStream = new MediaStream(stream.getTracks());
-      this.remoteStreams.set(peerId, updatedStream);
-
-      if (this.onRemoteStreamCallback) {
-        this.onRemoteStreamCallback(peerId, updatedStream);
-      }
-    };
-
-    pc.oniceconnectionstatechange = () => {
-      if (pc!.iceConnectionState === 'connected' || pc!.iceConnectionState === 'completed') {
-        const s = this.remoteStreams.get(peerId);
-        if (s && this.onRemoteStreamCallback) {
-          this.onRemoteStreamCallback(peerId, new MediaStream(s.getTracks()));
-        }
-      }
-    };
-
-    pc.onconnectionstatechange = () => {
-      if (pc!.connectionState === 'failed') {
-        try {
-          pc!.restartIce();
-          this.connectToPeer(peerId).catch(() => {});
-        } catch {
-          // ignore
-        }
-      } else if (pc!.connectionState === 'disconnected' || pc!.connectionState === 'closed') {
-        setTimeout(() => {
-          if (pc!.connectionState === 'disconnected' || pc!.connectionState === 'closed') {
-            if (this.onPeerDisconnectCallback) {
-              this.onPeerDisconnectCallback(peerId);
-            }
-          }
-        }, 3000);
-      }
-    };
-
-    return pc;
-  }
-
-  // Initiator creates offer to peer
-  async connectToPeer(peerId: string) {
-    if (peerId === this.localUserId) return;
-    const pc = await this.getOrCreatePeer(peerId);
-
-    // If already negotiating or have local offer, wait or skip
-    if (pc.signalingState !== 'stable') return;
-
-    try {
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: true,
-      });
-      await pc.setLocalDescription(offer);
-      await this.sendSignal(peerId, 'offer', JSON.stringify(offer));
-    } catch {
-      // ignore
-    }
-  }
-
-  private async flushPendingCandidates(peerId: string, pc: RTCPeerConnection) {
-    const queued = this.pendingCandidates.get(peerId) || [];
-    if (queued.length === 0) return;
-    this.pendingCandidates.delete(peerId);
-
-    for (const cand of queued) {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(cand));
-      } catch {
-        // ignore
-      }
-    }
-  }
-
-  private async handleIncomingSignal(from: string, type: string, payload: string) {
-    try {
-      const pc = await this.getOrCreatePeer(from);
-
-      if (type === 'offer') {
-        const offer = JSON.parse(payload);
-        // Handle offer collision / glare
-        if (pc.signalingState !== 'stable') {
-          // If local ID is lower, yield and rollback local offer (polite peer)
-          if (this.localUserId < from) {
-            await pc.setLocalDescription({ type: 'rollback' } as RTCSessionDescriptionInit);
-          } else {
-            // Impolite peer ignores colliding offer
-            return;
-          }
-        }
-
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        await this.flushPendingCandidates(from, pc);
-
-        // Attach local tracks to senders before answering
-        const activeStream = this.screenStream || this.localStream;
-        if (activeStream) {
-          for (const track of activeStream.getTracks()) {
-            const transceiver = pc.getTransceivers().find(
-              (t) => t.sender.track?.kind === track.kind || t.receiver?.track?.kind === track.kind
-            );
-            if (transceiver) {
-              await transceiver.sender.replaceTrack(track);
-              transceiver.direction = 'sendrecv';
-            } else {
-              try {
-                pc.addTrack(track, activeStream);
-              } catch {
-                // ignore
-              }
-            }
-          }
-        }
-
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        await this.sendSignal(from, 'answer', JSON.stringify(answer));
-      } else if (type === 'answer') {
-        const answer = JSON.parse(payload);
-        if (pc.signalingState === 'have-local-offer') {
-          await pc.setRemoteDescription(new RTCSessionDescription(answer));
-          await this.flushPendingCandidates(from, pc);
-        }
-      } else if (type === 'candidate') {
-        const candidate = JSON.parse(payload);
-        if (candidate) {
-          if (!pc.remoteDescription || !pc.remoteDescription.type) {
-            const list = this.pendingCandidates.get(from) || [];
-            list.push(candidate);
-            this.pendingCandidates.set(from, list);
-          } else {
-            try {
-              await pc.addIceCandidate(new RTCIceCandidate(candidate));
-            } catch {
-              // ignore
-            }
-          }
-        }
-      }
-    } catch {
-      // Signal error fallback
-    }
-  }
-
-  private async sendSignal(to: string, type: 'offer' | 'answer' | 'candidate', payload: string) {
-    try {
-      const signalsRef = collection(db, 'rooms', this.roomId, 'signals');
-      const newSignalDoc = doc(signalsRef);
-      await setDoc(newSignalDoc, {
-        from: this.localUserId,
-        to,
-        type,
-        payload,
-        timestamp: Date.now(),
-      });
-    } catch {
-      // ignore
     }
   }
 
   async closeAll() {
-    if (this.unsubscribeSignals) {
-      this.unsubscribeSignals();
+    this.isListening = false;
+
+    for (const [, timer] of this.callRetryTimers) {
+      clearTimeout(timer);
     }
-    this.peerConnections.forEach((pc) => pc.close());
-    this.peerConnections.clear();
+    this.callRetryTimers.clear();
+
+    for (const [, call] of this.activeCalls) {
+      try {
+        call.close();
+      } catch {
+        // ignore
+      }
+    }
+    this.activeCalls.clear();
     this.remoteStreams.clear();
 
-    // Clean up signals created by this user
-    try {
-      const signalsRef = collection(db, 'rooms', this.roomId, 'signals');
-      const q = query(signalsRef, where('from', '==', this.localUserId));
-      const snap = await getDocs(q);
-      snap.forEach((d) => deleteDoc(d.ref));
-    } catch {
-      // ignore
+    if (this.peer && !this.peer.destroyed) {
+      try {
+        this.peer.destroy();
+      } catch {
+        // ignore
+      }
+      this.peer = null;
     }
   }
 }

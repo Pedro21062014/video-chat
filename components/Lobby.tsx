@@ -16,6 +16,7 @@ import {
 import { sound } from '@/lib/sound';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
+import { checkCallLimit } from '@/lib/callsLimit';
 
 const DEFAULT_PARTICIPANT_NAME = 'Participante';
 
@@ -261,10 +262,9 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
     setIsCreatingMeeting(true);
     setRoomError(null);
 
-    // 1. Verify active calls limit per IP (max 3 devices) - only applies to starting a new meeting
+    // 1. Verify active calls limit (max 3 devices) - only applies to starting a new meeting
     try {
-      const checkRes = await fetch('/api/calls-limit?action=new_room');
-      const checkData = await checkRes.json();
+      const checkData = await checkCallLimit(true);
       if (!checkData.allowed) {
         setRoomError(
           checkData.message ||
