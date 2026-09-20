@@ -172,7 +172,9 @@ export const VideoTile: React.FC<VideoTileProps> = ({
 
   const videoTracks = stream ? stream.getVideoTracks() : [];
   const activeVideoTrack = videoTracks.find((t) => t.readyState !== 'ended');
-  const hasVideo = !participant.isVideoMuted && Boolean(activeVideoTrack);
+  const hasVideo = isLocal
+    ? !participant.isVideoMuted && Boolean(activeVideoTrack)
+    : Boolean(activeVideoTrack) && (!participant.isVideoMuted || Boolean(activeVideoTrack?.enabled));
 
   return (
     <div

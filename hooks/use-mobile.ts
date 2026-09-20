@@ -1,23 +1,30 @@
 import * as React from "react"
 
-const MOBILE_BREAKPOINT = 768
+const MOBILE_BREAKPOINT = 768;
+
+function checkMobile(): boolean {
+  if (typeof window === "undefined") return false;
+  const isWidthMobile = window.innerWidth < MOBILE_BREAKPOINT;
+  const isMobileUA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent || ""
+  );
+  return isWidthMobile || (isMobileUA && window.innerWidth <= 1024);
+}
 
 export function useIsMobile() {
-  const [isMobile, setIsMobile] = React.useState<boolean>(() => {
-    if (typeof window !== "undefined") {
-      return window.innerWidth < MOBILE_BREAKPOINT;
-    }
-    return false;
-  })
+  const [isMobile, setIsMobile] = React.useState<boolean>(checkMobile);
 
   React.useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
     const onChange = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
-    }
-    mql.addEventListener("change", onChange)
-    return () => mql.removeEventListener("change", onChange)
-  }, [])
+      setIsMobile(checkMobile());
+    };
+    window.addEventListener("resize", onChange);
+    window.addEventListener("orientationchange", onChange);
+    return () => {
+      window.removeEventListener("resize", onChange);
+      window.removeEventListener("orientationchange", onChange);
+    };
+  }, []);
 
-  return isMobile
+  return isMobile;
 }

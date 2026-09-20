@@ -35,7 +35,8 @@ import { CameraSettingsModal } from '@/components/CameraSettingsModal';
 import { WhatsAppTwoPartyView } from '@/components/WhatsAppTwoPartyView';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { Info, Copy, Check, LayoutGrid } from 'lucide-react';
+import { AudioActivityDetector } from '@/lib/audioDetector';
+import { Info, Copy, Check, LayoutGrid, Volume2, UserCheck, Sparkles } from 'lucide-react';
 
 const AVATAR_COLORS = [
   '#3b82f6', // blue
@@ -94,52 +95,39 @@ export default function MeetingApp() {
   const [copiedLinkBanner, setCopiedLinkBanner] = useState(false);
   const [pipTrigger, setPipTrigger] = useState(0);
   const [twoPartyViewMode, setTwoPartyViewMode] = useState<'whatsapp' | 'grid'>('whatsapp');
+  const [activeSpeakerId, setActiveSpeakerId] = useState<string | null>(null);
+  const [pinnedSpeakerId, setPinnedSpeakerId] = useState<string | null>(null);
+  const [speakingUsersMap, setSpeakingUsersMap] = useState<Map<string, boolean>>(new Map());
+  const [speakerViewOverride, setSpeakerViewOverride] = useState<'speaker' | 'grid' | 'auto'>('auto');
+  const audioDetectorRef = useRef<AudioActivityDetector | null>(null);
   const isMobile = useIsMobile();
 
   const webrtcManagerRef = useRef<PeerConnectionManager | null>(null);
 
-  // Safe Client Initialization: Detect URL parameter and handle reloads without crashing hydration
+  // Safe Client Initialization: Detect URL parameter and clean up previous local session if reloaded
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     try {
-      const navEntries = performance.getEntriesByType('navigation');
-      const isReload =
-        navEntries.length > 0 &&
-        (navEntries[0] as PerformanceNavigationTiming).type === 'reload';
-
-      if (isReload) {
-        try {
-          const url = new URL(window.location.href);
-          if (url.searchParams.has('room')) {
-            url.searchParams.delete('room');
-            window.history.replaceState({}, '', url.pathname);
-          }
-        } catch {
-          // ignore URL/history errors in sandboxed iframes
+      // If there was an old session stored, clean it up
+      try {
+        const lastActiveRoom = sessionStorage.getItem('active_call_room');
+        const lastActiveUser = sessionStorage.getItem('active_call_user');
+        if (lastActiveRoom && lastActiveUser) {
+          deleteDoc(doc(db, 'rooms', lastActiveRoom, 'participants', lastActiveUser)).catch(() => {});
+          fetch('/api/calls-limit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'leave', roomId: lastActiveRoom, userId: lastActiveUser }),
+          }).catch(() => {});
         }
-
-        try {
-          const lastActiveRoom = sessionStorage.getItem('active_call_room');
-          const lastActiveUser = sessionStorage.getItem('active_call_user');
-          if (lastActiveRoom && lastActiveUser) {
-            deleteDoc(doc(db, 'rooms', lastActiveRoom, 'participants', lastActiveUser)).catch(() => {});
-            fetch('/api/calls-limit', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ action: 'leave', roomId: lastActiveRoom, userId: lastActiveUser }),
-            }).catch(() => {});
-          }
-          sessionStorage.removeItem('active_call_room');
-          sessionStorage.removeItem('active_call_user');
-        } catch {
-          // ignore
-        }
-        // roomId is already '' by default
-        return;
+        sessionStorage.removeItem('active_call_room');
+        sessionStorage.removeItem('active_call_user');
+      } catch {
+        // ignore
       }
 
-      // Normal load: check query parameter ?room=...
+      // Check query parameter ?room=... and retain it!
       const params = new URLSearchParams(window.location.search);
       const queryRoom = (params.get('room') || '').toLowerCase().trim();
       if (queryRoom) {
@@ -385,43 +373,60 @@ export default function MeetingApp() {
 
         // B. Acquire fresh media stream
         const targetOpt = VIDEO_QUALITIES.find((q) => q.id === videoQuality) || VIDEO_QUALITIES[2];
-        const constraints: MediaStreamConstraints = {
-          audio: true,
-          video: initialVideoMuted
-            ? false
-            : {
-                ...(selectedCameraId ? { deviceId: { exact: selectedCameraId } } : { facingMode: 'user' }),
-                width: { ideal: targetOpt.width },
-                height: { ideal: targetOpt.height },
-                frameRate: { ideal: targetOpt.frameRate },
-              },
-        };
+        let stream: MediaStream | null = null;
 
-        let stream: MediaStream;
-        try {
-          stream = await navigator.mediaDevices.getUserMedia(constraints);
-        } catch {
-          // Fallback to standard audio + video
-          stream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
-            video: !initialVideoMuted,
-          });
+        if (!initialVideoMuted) {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: selectedCameraId
+                ? { deviceId: { ideal: selectedCameraId }, width: { ideal: targetOpt.width }, height: { ideal: targetOpt.height }, frameRate: { ideal: targetOpt.frameRate } }
+                : { facingMode: 'user', width: { ideal: targetOpt.width }, height: { ideal: targetOpt.height }, frameRate: { ideal: targetOpt.frameRate } },
+              audio: !initialAudioMuted,
+            });
+          } catch {
+            // Fallback: try basic video with audio
+            try {
+              stream = await navigator.mediaDevices.getUserMedia({
+                video: true,
+                audio: !initialAudioMuted,
+              });
+            } catch {
+              // Video permission failed or camera busy; try audio only
+              try {
+                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                setIsVideoMuted(true);
+              } catch {
+                stream = new MediaStream();
+                setIsVideoMuted(true);
+                setIsAudioMuted(true);
+              }
+            }
+          }
+        } else {
+          // Video starts muted: acquire audio only
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: !initialAudioMuted });
+          } catch {
+            stream = new MediaStream();
+          }
         }
 
-        // Apply initial mute states to tracks
-        stream.getAudioTracks().forEach((t) => {
-          t.enabled = !initialAudioMuted;
-        });
-        stream.getVideoTracks().forEach((t) => {
-          t.enabled = !initialVideoMuted;
-        });
+        if (stream) {
+          // Apply initial mute states to tracks
+          stream.getAudioTracks().forEach((t) => {
+            t.enabled = !initialAudioMuted;
+          });
+          stream.getVideoTracks().forEach((t) => {
+            t.enabled = !initialVideoMuted;
+          });
 
-        localStreamRef.current = stream;
-        setLocalStream(stream);
-        rtc.setLocalStream(stream);
+          localStreamRef.current = stream;
+          setLocalStream(stream);
+          rtc.setLocalStream(stream);
 
-        if (selectedCameraId) {
-          setActiveCameraId(selectedCameraId);
+          if (selectedCameraId) {
+            setActiveCameraId(selectedCameraId);
+          }
         }
       } catch {
         // Last fallback: audio only if camera is blocked/denied
@@ -554,6 +559,15 @@ export default function MeetingApp() {
     // Clear connected peers cache
     connectedPeersRef.current.clear();
 
+    // Clean up audio activity detector
+    if (audioDetectorRef.current) {
+      audioDetectorRef.current.destroy();
+      audioDetectorRef.current = null;
+    }
+    setActiveSpeakerId(null);
+    setPinnedSpeakerId(null);
+    setSpeakingUsersMap(new Map());
+
     // Reset local state to show Lobby again
     setIsInRoom(false);
     setRemoteStreams(new Map());
@@ -625,18 +639,6 @@ export default function MeetingApp() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'heartbeat', roomId, userId: currentUserId }),
         }).catch(() => {});
-
-        // Clean up any stale ghost participants that closed tab without leaving
-        const pCol = collection(db, 'rooms', roomId, 'participants');
-        const pSnap = await getDocs(pCol);
-        const now = Date.now();
-        pSnap.forEach((d) => {
-          const p = d.data() as Participant;
-          if (p.userId === currentUserId) return;
-          if (now - (p.lastSeen || p.joinedAt || 0) > 45000) {
-            deleteDoc(d.ref).catch(() => {});
-          }
-        });
       } catch {
         // ignore
       }
@@ -709,7 +711,7 @@ export default function MeetingApp() {
       });
       setParticipants(list);
 
-      // Connect to any new peer that joined (deterministic initiator + mobile network watchdog)
+      // Connect to any new peer that joined (deterministic initiator)
       list.forEach((p) => {
         if (p.userId !== currentUserId && webrtcManagerRef.current) {
           if (!connectedPeersRef.current.has(p.userId)) {
@@ -718,13 +720,6 @@ export default function MeetingApp() {
             if (currentUserId > p.userId) {
               webrtcManagerRef.current.connectToPeer(p.userId);
             }
-
-            // Mobile network watchdog: if no stream received after 2.5s, trigger connect attempt to ensure handshake completes
-            setTimeout(() => {
-              if (webrtcManagerRef.current && !remoteStreamsRef.current.has(p.userId)) {
-                webrtcManagerRef.current.connectToPeer(p.userId);
-              }
-            }, 2500);
           }
         }
       });
@@ -780,23 +775,82 @@ export default function MeetingApp() {
     };
   }, [isInRoom, roomId, currentUserId, isChatOpen]);
 
+  // Realtime Web Audio Speaking Activity Detector
+  useEffect(() => {
+    if (!isInRoom || !roomId || !currentUserId) {
+      if (audioDetectorRef.current) {
+        audioDetectorRef.current.destroy();
+        audioDetectorRef.current = null;
+      }
+      return;
+    }
+
+    if (!audioDetectorRef.current) {
+      audioDetectorRef.current = new AudioActivityDetector((speakingMap, loudSpeakerId) => {
+        setSpeakingUsersMap(new Map(speakingMap));
+        if (loudSpeakerId) {
+          setActiveSpeakerId(loudSpeakerId);
+        }
+      });
+    }
+
+    // Register local stream
+    audioDetectorRef.current.registerStream(currentUserId, localStream, isAudioMuted);
+
+    // Register all remote streams
+    remoteStreams.forEach((stream, peerId) => {
+      const p = participants.find((part) => part.userId === peerId);
+      audioDetectorRef.current?.registerStream(peerId, stream, Boolean(p?.isAudioMuted));
+    });
+  }, [isInRoom, roomId, currentUserId, localStream, isAudioMuted, remoteStreams, participants]);
+
   // Toggle Audio Track
   const handleToggleAudio = async () => {
     const nextState = !isAudioMuted;
     setIsAudioMuted(nextState);
 
-    if (localStreamRef.current) {
-      localStreamRef.current.getAudioTracks().forEach((track) => {
-        track.enabled = !nextState;
-      });
-    }
-
-    // Update firestore participant doc
     try {
       const pRef = doc(db, 'rooms', roomId, 'participants', currentUserId);
       await setDoc(pRef, { isAudioMuted: nextState }, { merge: true });
     } catch {
       // ignore
+    }
+
+    if (nextState) {
+      if (localStreamRef.current) {
+        localStreamRef.current.getAudioTracks().forEach((track) => {
+          track.enabled = false;
+        });
+      }
+      return;
+    }
+
+    // Unmuting mic
+    const existingAudio = localStreamRef.current?.getAudioTracks().find((t) => t.readyState === 'live');
+    if (existingAudio) {
+      existingAudio.enabled = true;
+      return;
+    }
+
+    // Acquire mic if missing
+    try {
+      const newAudio = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const newTrack = newAudio.getAudioTracks()[0];
+      if (newTrack) {
+        newTrack.enabled = true;
+        if (!localStreamRef.current) {
+          localStreamRef.current = new MediaStream([newTrack]);
+        } else {
+          localStreamRef.current.addTrack(newTrack);
+        }
+        setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+        if (webrtcManagerRef.current) {
+          webrtcManagerRef.current.setLocalStream(localStreamRef.current);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to acquire microphone on toggle:', err);
+      setIsAudioMuted(true);
     }
   };
 
@@ -805,17 +859,75 @@ export default function MeetingApp() {
     const nextState = !isVideoMuted;
     setIsVideoMuted(nextState);
 
-    if (localStreamRef.current) {
-      localStreamRef.current.getVideoTracks().forEach((track) => {
-        track.enabled = !nextState;
-      });
-    }
-
     try {
       const pRef = doc(db, 'rooms', roomId, 'participants', currentUserId);
       await setDoc(pRef, { isVideoMuted: nextState }, { merge: true });
     } catch {
       // ignore
+    }
+
+    if (nextState) {
+      // Muting video
+      if (localStreamRef.current) {
+        localStreamRef.current.getVideoTracks().forEach((track) => {
+          track.enabled = false;
+        });
+        setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+      }
+      return;
+    }
+
+    // Unmuting video (Turning camera ON)
+    const existingLiveTrack = localStreamRef.current?.getVideoTracks().find((t) => t.readyState === 'live');
+    if (existingLiveTrack) {
+      existingLiveTrack.enabled = true;
+      if (localStreamRef.current) {
+        setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+        if (webrtcManagerRef.current) {
+          webrtcManagerRef.current.setLocalStream(localStreamRef.current);
+        }
+      }
+      return;
+    }
+
+    // If no live video track exists in localStream, actively acquire camera!
+    try {
+      const targetOpt = VIDEO_QUALITIES.find((q) => q.id === videoQuality) || VIDEO_QUALITIES[2];
+      const newMedia = await navigator.mediaDevices.getUserMedia({
+        video: activeCameraId
+          ? { deviceId: { ideal: activeCameraId }, width: { ideal: targetOpt.width }, height: { ideal: targetOpt.height } }
+          : { facingMode: 'user', width: { ideal: targetOpt.width }, height: { ideal: targetOpt.height } },
+        audio: false,
+      });
+
+      const newTrack = newMedia.getVideoTracks()[0];
+      if (newTrack) {
+        newTrack.enabled = true;
+        if (!localStreamRef.current) {
+          localStreamRef.current = new MediaStream([newTrack]);
+        } else {
+          localStreamRef.current.getVideoTracks().forEach((t) => {
+            localStreamRef.current?.removeTrack(t);
+            t.stop();
+          });
+          localStreamRef.current.addTrack(newTrack);
+        }
+
+        const freshStream = new MediaStream(localStreamRef.current.getTracks());
+        setLocalStream(freshStream);
+        if (webrtcManagerRef.current) {
+          webrtcManagerRef.current.setLocalStream(localStreamRef.current);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to acquire camera on toggle:', err);
+      setIsVideoMuted(true);
+      try {
+        const pRef = doc(db, 'rooms', roomId, 'participants', currentUserId);
+        await setDoc(pRef, { isVideoMuted: true }, { merge: true });
+      } catch {
+        // ignore
+      }
     }
   };
 
@@ -1021,16 +1133,10 @@ export default function MeetingApp() {
     })),
   ];
 
-  // Dynamic Grid layout calculation
+  // Dynamic Grid & Speaker Spotlight layout calculation
   const totalCount = allTiles.length;
-  let gridColsClass = 'grid-cols-1';
-  if (totalCount === 2) gridColsClass = 'grid-cols-1 md:grid-cols-2';
-  else if (totalCount >= 3 && totalCount <= 4) gridColsClass = 'grid-cols-1 sm:grid-cols-2';
-  else if (totalCount >= 5 && totalCount <= 6) gridColsClass = 'grid-cols-2 md:grid-cols-3';
-  else if (totalCount > 6) gridColsClass = 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4';
 
-  // Desktop 2-party view: Left camera (local), Right camera (guest), EXACT same size and format, no small corner box
-  const isTwoParticipantsOnDesktop = !isMobile && totalCount === 2;
+  // 1. Mobile 2-party view: WhatsApp full screen + PIP draggable corner box
   const shouldRenderWhatsAppView =
     isMobile &&
     totalCount === 2 &&
@@ -1038,12 +1144,36 @@ export default function MeetingApp() {
     uniqueRemoteParticipants.length > 0 &&
     Boolean(uniqueRemoteParticipants[0]);
 
+  // 2. 2 participants on desktop / tablet
+  const isTwoParticipants = totalCount === 2;
+
+  // 3. 3 participants: 3 vertical rectangles side-by-side
+  const isThreeParticipants = totalCount === 3;
+
+  // 4. 4 participants: 2x2 grid of 4 equal rectangles
+  const isFourParticipants = totalCount === 4;
+
+  // 5. >4 participants: Active Speaker Spotlight View
+  const isMoreThanFour = totalCount > 4;
+  const isSpeakerSpotlightView = isMoreThanFour && speakerViewOverride !== 'grid';
+
+  // For Speaker Spotlight: determine who is in full screen stage
+  const spotlightUserId =
+    pinnedSpeakerId ||
+    activeSpeakerId ||
+    (uniqueRemoteParticipants[0]?.userId) ||
+    currentUserId;
+
+  const spotlightTile = allTiles.find((t) => t.participant.userId === spotlightUserId) || allTiles[0];
+  const filmstripTiles = allTiles.filter((t) => t.participant.userId !== spotlightTile.participant.userId);
+
   return (
     <ErrorBoundary
       fallbackTitle="Interface da Chamada Protegida"
       fallbackDescription="A interface da chamada detectou uma instabilidade e foi protegida com segurança."
       onReset={() => {
         setTwoPartyViewMode('grid');
+        setSpeakerViewOverride('auto');
       }}
     >
       <div className="relative h-screen h-[100dvh] w-screen max-w-full bg-[#202124] text-[#e8eaed] flex flex-col overflow-hidden select-none">
@@ -1088,11 +1218,24 @@ export default function MeetingApp() {
               </span>
             </button>
           )}
+
+          {isMoreThanFour && (
+            <button
+              id="btn-toggle-speaker-view"
+              onClick={() => setSpeakerViewOverride((prev) => (prev === 'grid' ? 'auto' : 'grid'))}
+              title="Alternar entre modo orador ativo e grade de participantes"
+              className="px-2.5 py-1 rounded-full text-xs font-medium bg-[#3c4043]/60 hover:bg-[#3c4043] text-[#e8eaed] flex items-center gap-1.5 transition-colors cursor-pointer border border-[#3c4043]"
+            >
+              <LayoutGrid className="w-3.5 h-3.5 text-[#8ab4f8]" />
+              <span>{speakerViewOverride === 'grid' ? 'Modo Orador' : 'Modo Grade'}</span>
+            </button>
+          )}
+
           <span className="font-medium text-[#e8eaed]">{currentTime}</span>
         </div>
       </header>
 
-      {/* Main Video Area: On Mobile if WhatsApp mode is selected, render WhatsAppTwoPartyView. On PC, always render side-by-side in same format */}
+      {/* Main Video Area */}
       {shouldRenderWhatsAppView ? (
         <ErrorBoundary
           fallbackTitle="Visualização Restaurada"
@@ -1109,14 +1252,102 @@ export default function MeetingApp() {
             onToggleVideo={handleToggleVideo}
           />
         </ErrorBoundary>
+      ) : isSpeakerSpotlightView ? (
+        /* > 4 Participants: Speaker Spotlight View (Orador em destaque inteiro + miniaturas abaixo) */
+        <main
+          id="speaker-spotlight-container"
+          className="relative flex-1 min-h-0 w-full flex flex-col overflow-hidden max-w-7xl mx-auto p-2 sm:p-4 gap-2.5"
+        >
+          {/* Spotlight Header Sub-bar */}
+          <div className="flex items-center justify-between px-2 text-xs text-[#9aa0a6] shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="flex items-center gap-1.5 bg-[#3c4043]/80 px-3 py-1 rounded-full text-white font-medium border border-white/10 shadow-sm">
+                <Sparkles className="w-3.5 h-3.5 text-[#8ab4f8]" />
+                <span className="text-[#9aa0a6]">Orador:</span>
+                <span className="text-[#8ab4f8] font-semibold">
+                  {spotlightTile.isLocal ? 'Você' : spotlightTile.participant.displayName}
+                </span>
+                {pinnedSpeakerId && (
+                  <span className="text-[10px] bg-[#8ab4f8]/20 text-[#8ab4f8] px-1.5 py-0.5 rounded font-normal">
+                    Fixado
+                  </span>
+                )}
+              </span>
+              {pinnedSpeakerId && (
+                <button
+                  onClick={() => setPinnedSpeakerId(null)}
+                  className="hover:text-white underline cursor-pointer text-xs transition-colors"
+                >
+                  Voltar ao foco automático
+                </button>
+              )}
+            </div>
+
+            <span className="text-[11px] text-[#9aa0a6]">
+              {totalCount} participantes na chamada
+            </span>
+          </div>
+
+          {/* Primary Spotlight Large Video Tile */}
+          <div className="relative flex-1 min-h-0 w-full rounded-xl sm:rounded-2xl overflow-hidden shadow-2xl bg-[#202124] border border-[#3c4043]">
+            <VideoTile
+              key={spotlightTile.participant.userId}
+              participant={spotlightTile.participant}
+              stream={spotlightTile.stream}
+              isLocal={spotlightTile.isLocal}
+              isSpeaking={speakingUsersMap.get(spotlightTile.participant.userId) ?? !spotlightTile.participant.isAudioMuted}
+              onOpenSettings={spotlightTile.isLocal ? () => setIsCameraSettingsOpen(true) : undefined}
+              onToggleVideo={spotlightTile.isLocal ? handleToggleVideo : undefined}
+              currentQuality={spotlightTile.isLocal ? videoQuality : undefined}
+            />
+          </div>
+
+          {/* Bottom Filmstrip Carousel */}
+          <div className="h-24 sm:h-32 md:h-36 w-full shrink-0 flex gap-2.5 sm:gap-3 overflow-x-auto px-1 py-1 scrollbar-thin">
+            {filmstripTiles.map(({ participant, stream, isLocal }) => {
+              const isSpeaking = speakingUsersMap.get(participant.userId) ?? !participant.isAudioMuted;
+              return (
+                <div
+                  key={participant.userId}
+                  onClick={() => setPinnedSpeakerId(participant.userId)}
+                  title="Clique para fixar como orador principal"
+                  className="h-full aspect-[4/3] sm:aspect-video shrink-0 cursor-pointer rounded-xl overflow-hidden relative border-2 transition-all hover:scale-102 hover:border-[#8ab4f8] shadow-md group bg-[#28292c]"
+                  style={{
+                    borderColor: isSpeaking ? '#81c995' : 'rgba(255, 255, 255, 0.15)',
+                  }}
+                >
+                  <VideoTile
+                    participant={participant}
+                    stream={stream}
+                    isLocal={isLocal}
+                    isSpeaking={isSpeaking}
+                    onOpenSettings={isLocal ? () => setIsCameraSettingsOpen(true) : undefined}
+                    onToggleVideo={isLocal ? handleToggleVideo : undefined}
+                    currentQuality={isLocal ? videoQuality : undefined}
+                  />
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none z-20">
+                    <span className="text-[11px] bg-black/80 px-2 py-1 rounded-md text-white font-medium flex items-center gap-1 shadow">
+                      <UserCheck className="w-3 h-3 text-[#8ab4f8]" />
+                      Destacar
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </main>
       ) : (
         /* Main Video Tiles Grid Container */
         <main
           id="video-tiles-grid"
           className={`relative flex-1 min-h-0 p-2 sm:p-4 md:p-5 ${
-            isTwoParticipantsOnDesktop
-              ? 'grid grid-cols-2 gap-3 sm:gap-5 md:gap-6 items-center justify-center max-w-6xl mx-auto w-full h-full'
-              : `grid ${gridColsClass} gap-2.5 sm:gap-4 items-center justify-center auto-rows-fr max-w-7xl mx-auto w-full`
+            isTwoParticipants
+              ? 'grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-5 md:gap-6 items-center justify-center max-w-6xl mx-auto w-full h-full'
+              : isThreeParticipants
+              ? 'grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 items-stretch justify-center max-w-7xl mx-auto w-full h-full'
+              : isFourParticipants
+              ? 'grid grid-cols-2 grid-rows-2 gap-3 sm:gap-4 items-center justify-center max-w-6xl mx-auto w-full h-full'
+              : 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4 items-center justify-center auto-rows-fr max-w-7xl mx-auto w-full h-full'
           } overflow-hidden transition-all duration-200`}
         >
           {totalCount === 1 && (
@@ -1138,7 +1369,7 @@ export default function MeetingApp() {
               participant={participant}
               stream={stream}
               isLocal={isLocal}
-              isSpeaking={!participant.isAudioMuted}
+              isSpeaking={speakingUsersMap.get(participant.userId) ?? !participant.isAudioMuted}
               onOpenSettings={isLocal ? () => setIsCameraSettingsOpen(true) : undefined}
               onToggleVideo={isLocal ? handleToggleVideo : undefined}
               currentQuality={isLocal ? videoQuality : undefined}

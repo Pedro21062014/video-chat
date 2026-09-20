@@ -79,11 +79,15 @@ export const WhatsAppTwoPartyView: React.FC<WhatsAppTwoPartyViewProps> = ({
   // Track video streams state safely
   const mainVideoTracks = mainStream ? mainStream.getVideoTracks() : [];
   const hasLiveMainTrack = mainVideoTracks.some((t) => t && t.readyState !== 'ended');
-  const hasMainVideo = Boolean(hasLiveMainTrack) && !mainParticipant.isVideoMuted;
+  const hasMainVideo = isMainLocal
+    ? Boolean(hasLiveMainTrack) && !mainParticipant.isVideoMuted
+    : Boolean(hasLiveMainTrack) && (!mainParticipant.isVideoMuted || mainVideoTracks.some((t) => t.enabled));
 
   const pipVideoTracks = pipStream ? pipStream.getVideoTracks() : [];
   const hasLivePipTrack = pipVideoTracks.some((t) => t && t.readyState !== 'ended');
-  const hasPipVideo = Boolean(hasLivePipTrack) && !pipParticipant.isVideoMuted;
+  const hasPipVideo = isPipLocal
+    ? Boolean(hasLivePipTrack) && !pipParticipant.isVideoMuted
+    : Boolean(hasLivePipTrack) && (!pipParticipant.isVideoMuted || pipVideoTracks.some((t) => t.enabled));
 
   // Bind main video stream safely
   useEffect(() => {
@@ -410,8 +414,10 @@ export const WhatsAppTwoPartyView: React.FC<WhatsAppTwoPartyViewProps> = ({
           transform: position ? `translate3d(${position.x}px, ${position.y}px, 0)` : undefined,
           touchAction: 'none',
         }}
-        className={`absolute top-0 left-0 z-30 w-28 sm:w-36 md:w-44 aspect-[3/4] sm:aspect-[9/16] md:aspect-[3/4] rounded-2xl overflow-hidden shadow-2xl border-2 border-white/25 bg-[#202124] cursor-grab active:cursor-grabbing transition-all select-none ${
-          isDragging ? 'scale-105 shadow-2xl border-white/50 opacity-95 duration-0' : 'duration-300'
+        className={`absolute ${
+          !position ? 'right-3 bottom-16 sm:right-5 sm:bottom-20' : 'top-0 left-0'
+        } z-30 w-24 sm:w-32 md:w-40 aspect-[3/4] rounded-2xl overflow-hidden shadow-2xl border-2 border-white/30 bg-[#202124] cursor-grab active:cursor-grabbing select-none ${
+          isDragging ? 'scale-105 shadow-2xl border-white/60 opacity-95 duration-0' : 'transition-all duration-300'
         }`}
       >
         {/* PIP Video Stream */}

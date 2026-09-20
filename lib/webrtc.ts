@@ -19,22 +19,6 @@ const RTC_CONFIG: RTCConfiguration = {
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
     { urls: 'stun:stun.cloudflare.com:3478' },
-    { urls: 'stun:openrelay.metered.ca:80' },
-    {
-      urls: 'turn:openrelay.metered.ca:80',
-      username: 'openrelay',
-      credential: 'openrelay',
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443',
-      username: 'openrelay',
-      credential: 'openrelay',
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-      username: 'openrelay',
-      credential: 'openrelay',
-    },
   ],
   iceCandidatePoolSize: 10,
 };
@@ -98,13 +82,15 @@ export class PeerConnectionManager {
       if (pc.connectionState === 'closed') continue;
 
       let renegNeeded = false;
-      const senders = pc.getSenders();
 
       for (const track of stream.getTracks()) {
-        const sender = senders.find((s) => s.track?.kind === track.kind || (!s.track && (s as unknown as { track: MediaStreamTrack | null }).track === null));
-        if (sender) {
+        const transceiver = pc.getTransceivers().find(
+          (t) => t.sender.track?.kind === track.kind || t.receiver?.track?.kind === track.kind
+        );
+        if (transceiver) {
           try {
-            await sender.replaceTrack(track);
+            await transceiver.sender.replaceTrack(track);
+            transceiver.direction = 'sendrecv';
           } catch {
             // fallback
           }
@@ -158,7 +144,17 @@ export class PeerConnectionManager {
           this.processedSignals.add(docId);
 
           const data = change.doc.data();
-          const { from, type, payload } = data;
+          const { from, type, payload, timestamp } = data;
+
+          // Discard stale signals from old sessions (older than 5 minutes)
+          if (timestamp && Date.now() - timestamp > 300000) {
+            try {
+              await deleteDoc(doc(signalsRef, docId));
+            } catch {
+              // ignore
+            }
+            return;
+          }
 
           await this.handleIncomingSignal(from, type, payload);
 
@@ -196,11 +192,13 @@ export class PeerConnectionManager {
     // Attach local tracks if already available
     const activeStream = this.screenStream || this.localStream;
     if (activeStream) {
-      const senders = pc.getSenders();
       for (const track of activeStream.getTracks()) {
-        const sender = senders.find((s) => s.track?.kind === track.kind || (!s.track && (s as unknown as { track: MediaStreamTrack | null }).track === null));
-        if (sender) {
-          sender.replaceTrack(track).catch(() => {});
+        const transceiver = pc.getTransceivers().find(
+          (t) => t.sender.track?.kind === track.kind || t.receiver?.track?.kind === track.kind
+        );
+        if (transceiver) {
+          transceiver.sender.replaceTrack(track).catch(() => {});
+          transceiver.direction = 'sendrecv';
         } else {
           try {
             pc.addTrack(track, activeStream);
@@ -226,15 +224,26 @@ export class PeerConnectionManager {
         this.remoteStreams.set(peerId, stream);
       }
 
+      const updateCallback = () => {
+        const curStream = this.remoteStreams.get(peerId);
+        if (curStream && this.onRemoteStreamCallback) {
+          this.onRemoteStreamCallback(peerId, new MediaStream(curStream.getTracks()));
+        }
+      };
+
       if (event.streams && event.streams[0]) {
         event.streams[0].getTracks().forEach((track) => {
           if (!stream!.getTracks().some((t) => t.id === track.id)) {
             stream!.addTrack(track);
+            track.addEventListener('unmute', updateCallback);
+            track.addEventListener('ended', updateCallback);
           }
         });
       } else if (event.track) {
         if (!stream.getTracks().some((t) => t.id === event.track.id)) {
           stream.addTrack(event.track);
+          event.track.addEventListener('unmute', updateCallback);
+          event.track.addEventListener('ended', updateCallback);
         }
       }
 
@@ -244,6 +253,15 @@ export class PeerConnectionManager {
 
       if (this.onRemoteStreamCallback) {
         this.onRemoteStreamCallback(peerId, updatedStream);
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      if (pc!.iceConnectionState === 'connected' || pc!.iceConnectionState === 'completed') {
+        const s = this.remoteStreams.get(peerId);
+        if (s && this.onRemoteStreamCallback) {
+          this.onRemoteStreamCallback(peerId, new MediaStream(s.getTracks()));
+        }
       }
     };
 
@@ -326,11 +344,19 @@ export class PeerConnectionManager {
         // Attach local tracks to senders before answering
         const activeStream = this.screenStream || this.localStream;
         if (activeStream) {
-          const senders = pc.getSenders();
           for (const track of activeStream.getTracks()) {
-            const sender = senders.find((s) => s.track?.kind === track.kind || (!s.track && (s as unknown as { track: MediaStreamTrack | null }).track === null));
-            if (sender) {
-              await sender.replaceTrack(track);
+            const transceiver = pc.getTransceivers().find(
+              (t) => t.sender.track?.kind === track.kind || t.receiver?.track?.kind === track.kind
+            );
+            if (transceiver) {
+              await transceiver.sender.replaceTrack(track);
+              transceiver.direction = 'sendrecv';
+            } else {
+              try {
+                pc.addTrack(track, activeStream);
+              } catch {
+                // ignore
+              }
             }
           }
         }

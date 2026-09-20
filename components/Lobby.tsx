@@ -42,6 +42,7 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
   const [selectedCameraId, setSelectedCameraId] = useState<string>('');
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraRetryCount, setCameraRetryCount] = useState(0);
   const [audioLevel, setAudioLevel] = useState(0);
   const [currentClock, setCurrentClock] = useState('');
   const [currentDateStr, setCurrentDateStr] = useState('');
@@ -55,6 +56,16 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
+
+  // Sync targetRoomId if initialRoomId is supplied or changes (e.g. from URL search params)
+  useEffect(() => {
+    if (initialRoomId) {
+      const timer = setTimeout(() => {
+        setTargetRoomId(initialRoomId);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [initialRoomId]);
 
   // Time & Date format Google Meet style (ex: 20:01 • sáb., 19 de set.)
   useEffect(() => {
@@ -152,6 +163,20 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
     };
   }, [isAudioMuted]);
 
+  // Bind previewStream to videoRef and play
+  useEffect(() => {
+    const videoEl = videoRef.current;
+    if (!videoEl) return;
+    if (previewStream && !isVideoMuted) {
+      if (videoEl.srcObject !== previewStream) {
+        videoEl.srcObject = previewStream;
+      }
+      videoEl.play().catch(() => {});
+    } else {
+      videoEl.srcObject = null;
+    }
+  }, [previewStream, isVideoMuted]);
+
   // Start local camera preview
   useEffect(() => {
     let active = true;
@@ -167,11 +192,24 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
       }
 
       try {
-        const constraints: MediaStreamConstraints = {
-          audio: false,
-          video: selectedCameraId ? { deviceId: { exact: selectedCameraId } } : { facingMode: 'user' },
-        };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        let stream: MediaStream;
+        const videoConstraint = selectedCameraId
+          ? { deviceId: { ideal: selectedCameraId } }
+          : { facingMode: 'user' };
+
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: videoConstraint,
+          });
+        } catch {
+          // Fallback: try basic video if ideal constraint fails
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: true,
+          });
+        }
+
         if (!active) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -182,12 +220,19 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
         }
         previewStreamRef.current = stream;
         setPreviewStream(stream);
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
         setCameraError(null);
-      } catch {
-        setCameraError('Permissão de câmera não concedida.');
+
+        // Update camera devices list now that permission is granted
+        navigator.mediaDevices?.enumerateDevices().then((devices) => {
+          if (!active) return;
+          const videoInputs = devices.filter((d) => d.kind === 'videoinput' && d.deviceId);
+          if (videoInputs.length > 0) {
+            setVideoDevices(videoInputs);
+          }
+        }).catch(() => {});
+      } catch (err) {
+        console.warn('Lobby camera preview error:', err);
+        setCameraError('Permissão de câmera não concedida ou câmera ocupada.');
       }
     }
 
@@ -201,7 +246,7 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
         previewStreamRef.current = null;
       }
     };
-  }, [isVideoMuted, selectedCameraId]);
+  }, [isVideoMuted, selectedCameraId, cameraRetryCount]);
 
   // Switch camera between front and back
   const handleSwitchCamera = () => {
@@ -484,12 +529,26 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
             {cameraError && !isVideoMuted && (
               <div className="absolute inset-0 bg-[#202124]/90 flex flex-col items-center justify-center p-6 text-center z-10">
                 <p className="text-xs text-[#f28b82] max-w-xs">{cameraError}</p>
-                <button
-                  onClick={() => setIsVideoMuted(true)}
-                  className="mt-3 text-xs text-[#8ab4f8] hover:underline"
-                >
-                  Continuar sem câmera
-                </button>
+                <div className="flex items-center gap-3 mt-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCameraError(null);
+                      setCameraRetryCount((c) => c + 1);
+                    }}
+                    className="text-xs text-[#8ab4f8] hover:underline font-medium cursor-pointer"
+                  >
+                    Tentar novamente
+                  </button>
+                  <span className="text-[#5f6368]">•</span>
+                  <button
+                    type="button"
+                    onClick={() => setIsVideoMuted(true)}
+                    className="text-xs text-[#9aa0a6] hover:underline cursor-pointer"
+                  >
+                    Continuar sem câmera
+                  </button>
+                </div>
               </div>
             )}
 
