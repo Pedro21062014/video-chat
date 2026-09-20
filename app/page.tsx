@@ -940,13 +940,14 @@ export default function MeetingApp() {
         roomId={roomId}
         isAudioMuted={isAudioMuted}
         isVideoMuted={isVideoMuted}
-        participantsCount={allTiles.length}
         displayName={displayName}
         onToggleAudio={handleToggleAudio}
         onToggleVideo={handleToggleVideo}
         onLeaveCall={handleLeaveCall}
         isInRoom={isInRoom}
         openTrigger={pipTrigger}
+        localStream={localStream}
+        isSidebarOpen={isChatOpen || isParticipantsOpen}
       />
 
       {/* Slide-in Chat Panel */}

@@ -302,7 +302,7 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
                 className="px-4 py-2.5 hover:bg-[#3c4043] flex items-center gap-3 text-left w-full cursor-pointer text-[#8ab4f8]"
               >
                 <PictureInPicture2 className="w-4 h-4 text-[#8ab4f8]" />
-                <span>Mini janela no PC</span>
+                <span>Mini janela (Câmera)</span>
               </button>
               <button
                 onClick={() => {
