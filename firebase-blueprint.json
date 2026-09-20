@@ -1,0 +1,77 @@
+{
+  "entities": {
+    "rooms": {
+      "title": "Room",
+      "description": "Video call room metadata and participants list",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "createdBy": { "type": "string" },
+        "hostId": { "type": "string" },
+        "hostName": { "type": "string" },
+        "status": { "type": "string" },
+        "endedAt": { "type": "number" },
+        "lastActive": { "type": "number" },
+        "clearedAt": { "type": "number" }
+      },
+      "required": ["title", "createdAt", "createdBy"]
+    },
+    "rooms/participants": {
+      "title": "Participant",
+      "description": "User inside room with audio/video/screen state",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "isAudioMuted": { "type": "boolean" },
+        "isVideoMuted": { "type": "boolean" },
+        "isScreenSharing": { "type": "boolean" },
+        "isHandRaised": { "type": "boolean" },
+        "joinedAt": { "type": "number" },
+        "lastSeen": { "type": "number" },
+        "role": { "type": "string" },
+        "avatarColor": { "type": "string" }
+      },
+      "required": ["userId", "displayName"]
+    },
+    "rooms/messages": {
+      "title": "Room Message",
+      "description": "Integrated meeting chat messages",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "text": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["senderId", "senderName", "text", "timestamp"]
+    },
+    "rooms/reactions": {
+      "title": "Reaction",
+      "description": "Floating emoji reactions",
+      "type": "object",
+      "properties": {
+        "emoji": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderId": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["emoji", "senderName", "timestamp"]
+    },
+    "rooms/signals": {
+      "title": "WebRTC Signal",
+      "description": "SDP offer, answer, and ICE candidates for peer-to-peer WebRTC",
+      "type": "object",
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "type": { "type": "string" },
+        "payload": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["from", "to", "type", "payload", "timestamp"]
+    }
+  }
+}
