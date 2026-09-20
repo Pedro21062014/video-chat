@@ -66,7 +66,7 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
   isChatOpen,
   isParticipantsOpen,
   currentTime,
-  isHost,
+  isHost = false,
   onToggleAudio,
   onToggleVideo,
   onToggleScreenShare,
@@ -397,11 +397,11 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
                 onLeaveCall();
               }
             }}
-            title={isHost ? 'Opções de desligar (Admin)' : 'Desligar chamada'}
+            title={isHost ? 'Opções de encerramento (Organizador)' : 'Sair da chamada'}
             className="h-9 sm:h-11 px-3 sm:px-5 rounded-full bg-[#ea4335] hover:bg-[#d93025] active:bg-[#c5221f] text-white font-medium text-xs sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 transition-all shrink-0 cursor-pointer shadow-md"
           >
             <PhoneOff className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
-            <span className="font-semibold">Desligar</span>
+            <span className="font-semibold">{isHost ? 'Desligar' : 'Sair'}</span>
             {isHost && <ChevronUp className="w-3.5 h-3.5 opacity-80" />}
           </button>
         </div>

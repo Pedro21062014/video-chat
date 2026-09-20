@@ -22,7 +22,7 @@ service cloud.firestore {
       }
     }
 
-    // Active calls tracked by IP for the 5-calls limit per IP
+    // Active calls tracked by IP for the 3-calls limit per IP (for new meetings)
     match /ip_active_calls/{callId} {
       allow read, write: if true;
     }

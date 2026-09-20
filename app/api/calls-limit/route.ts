@@ -10,7 +10,7 @@ import {
   where,
 } from 'firebase/firestore';
 
-const MAX_CALLS_PER_IP = 5;
+const MAX_CALLS_PER_IP = 3;
 const STALE_TIMEOUT_MS = 45000; // 45 seconds without heartbeat = stale session
 
 function getClientIp(req: NextRequest): string {
@@ -35,12 +35,15 @@ function sanitizeDocId(ip: string, userId: string): string {
 export async function GET(req: NextRequest) {
   try {
     const ip = getClientIp(req);
+    const action = req.nextUrl.searchParams.get('action') || 'new_room';
+    const isNewRoom = action === 'new_room';
+
     const colRef = collection(db, 'ip_active_calls');
     const q = query(colRef, where('ip', '==', ip));
     const snap = await getDocs(q);
 
     const now = Date.now();
-    let activeCount = 0;
+    const activeUsers = new Set<string>();
     const deletePromises: Promise<void>[] = [];
 
     snap.forEach((d) => {
@@ -48,8 +51,8 @@ export async function GET(req: NextRequest) {
       const lastSeen = data.lastSeen || data.joinedAt || 0;
       if (now - lastSeen > STALE_TIMEOUT_MS) {
         deletePromises.push(deleteDoc(d.ref));
-      } else {
-        activeCount++;
+      } else if (data.userId) {
+        activeUsers.add(data.userId);
       }
     });
 
@@ -57,14 +60,18 @@ export async function GET(req: NextRequest) {
       Promise.all(deletePromises).catch(() => {});
     }
 
-    if (activeCount >= MAX_CALLS_PER_IP) {
+    const activeCount = activeUsers.size;
+
+    // The limit only applies when starting a new meeting (nova reunião)
+    // Participants joining an existing meeting are not blocked!
+    if (isNewRoom && activeCount >= MAX_CALLS_PER_IP) {
       return NextResponse.json(
         {
           allowed: false,
           activeCount,
           maxAllowed: MAX_CALLS_PER_IP,
           message:
-            'O servidor está sobrecarregado. Limite de 5 chamadas ativas por IP atingido. Por favor, aguarde alguns instantes e tente novamente.',
+            'O servidor está sobrecarregado. Por favor, aguarde um pouco antes de iniciar a próxima ligação.',
         },
         { status: 429 }
       );
@@ -85,7 +92,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const ip = getClientIp(req);
-    let body: { action?: string; roomId?: string; userId?: string } = {};
+    let body: { action?: string; roomId?: string; userId?: string; isNewRoom?: boolean } = {};
 
     try {
       const text = await req.text();
@@ -99,6 +106,7 @@ export async function POST(req: NextRequest) {
     const action = body.action || 'heartbeat';
     const userId = body.userId || 'anon';
     const roomId = body.roomId || 'default';
+    const isNewRoom = Boolean(body.isNewRoom);
     const docId = sanitizeDocId(ip, userId);
     const callDocRef = doc(db, 'ip_active_calls', docId);
 
@@ -136,7 +144,7 @@ export async function POST(req: NextRequest) {
       const snap = await getDocs(q);
 
       const now = Date.now();
-      let activeCount = 0;
+      const activeUsers = new Set<string>();
       let alreadyRegistered = false;
       const deletePromises: Promise<void>[] = [];
 
@@ -144,14 +152,14 @@ export async function POST(req: NextRequest) {
         const data = d.data();
         if (data.userId === userId) {
           alreadyRegistered = true;
-          activeCount++;
+          activeUsers.add(userId);
           return;
         }
         const lastSeen = data.lastSeen || data.joinedAt || 0;
         if (now - lastSeen > STALE_TIMEOUT_MS) {
           deletePromises.push(deleteDoc(d.ref));
-        } else {
-          activeCount++;
+        } else if (data.userId) {
+          activeUsers.add(data.userId);
         }
       });
 
@@ -159,14 +167,16 @@ export async function POST(req: NextRequest) {
         Promise.all(deletePromises).catch(() => {});
       }
 
-      if (!alreadyRegistered && activeCount >= MAX_CALLS_PER_IP) {
+      // ONLY block if starting a new meeting (nova reunião) and limit reached.
+      // Participants joining an existing meeting are NEVER blocked!
+      if (isNewRoom && !alreadyRegistered && activeUsers.size >= MAX_CALLS_PER_IP) {
         return NextResponse.json(
           {
             allowed: false,
-            activeCount,
+            activeCount: activeUsers.size,
             maxAllowed: MAX_CALLS_PER_IP,
             message:
-              'O servidor está sobrecarregado. Limite de 5 chamadas ativas por IP atingido. Por favor, aguarde alguns instantes e tente novamente.',
+              'O servidor está sobrecarregado. Por favor, aguarde um pouco antes de iniciar a próxima ligação.',
           },
           { status: 429 }
         );
@@ -176,13 +186,14 @@ export async function POST(req: NextRequest) {
         ip,
         userId,
         roomId,
+        isNewRoom,
         joinedAt: Date.now(),
         lastSeen: Date.now(),
       });
 
       return NextResponse.json({
         allowed: true,
-        activeCount: alreadyRegistered ? activeCount : activeCount + 1,
+        activeCount: alreadyRegistered ? activeUsers.size : activeUsers.size + 1,
         maxAllowed: MAX_CALLS_PER_IP,
       });
     }

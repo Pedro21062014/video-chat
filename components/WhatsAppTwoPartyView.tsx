@@ -78,12 +78,12 @@ export const WhatsAppTwoPartyView: React.FC<WhatsAppTwoPartyViewProps> = ({
 
   // Track video streams state safely
   const mainVideoTracks = mainStream ? mainStream.getVideoTracks() : [];
-  const activeMainTrack = mainVideoTracks.find((t) => t && t.readyState === 'live');
-  const hasMainVideo = !mainParticipant.isVideoMuted && Boolean(activeMainTrack);
+  const hasLiveMainTrack = mainVideoTracks.some((t) => t && t.readyState !== 'ended');
+  const hasMainVideo = Boolean(hasLiveMainTrack) && !mainParticipant.isVideoMuted;
 
   const pipVideoTracks = pipStream ? pipStream.getVideoTracks() : [];
-  const activePipTrack = pipVideoTracks.find((t) => t && t.readyState === 'live');
-  const hasPipVideo = !pipParticipant.isVideoMuted && Boolean(activePipTrack);
+  const hasLivePipTrack = pipVideoTracks.some((t) => t && t.readyState !== 'ended');
+  const hasPipVideo = Boolean(hasLivePipTrack) && !pipParticipant.isVideoMuted;
 
   // Bind main video stream safely
   useEffect(() => {
@@ -93,12 +93,40 @@ export const WhatsAppTwoPartyView: React.FC<WhatsAppTwoPartyViewProps> = ({
         if (videoEl.srcObject !== mainStream) {
           videoEl.srcObject = mainStream;
         }
-        videoEl.play().catch(() => {});
+        const playPromise = videoEl.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            console.warn('Autoplay unmuted blocked on main video:', err);
+            // If blocked on mobile because unmuted, mute temporarily so video displays immediately!
+            if (!isMainLocal) {
+              videoEl.muted = true;
+              videoEl.play().catch(() => {});
+            }
+          });
+        }
       }
     } catch {
       // ignore
     }
-  }, [mainStream, isSwapped]);
+  }, [mainStream, isSwapped, isMainLocal]);
+
+  // Auto unmute main remote video when user taps screen on mobile
+  useEffect(() => {
+    if (isMainLocal) return;
+    const handleUserInteraction = () => {
+      const videoEl = mainVideoRef.current;
+      if (videoEl && videoEl.muted) {
+        videoEl.muted = false;
+        videoEl.play().catch(() => {});
+      }
+    };
+    window.addEventListener('touchstart', handleUserInteraction, { passive: true });
+    window.addEventListener('click', handleUserInteraction);
+    return () => {
+      window.removeEventListener('touchstart', handleUserInteraction);
+      window.removeEventListener('click', handleUserInteraction);
+    };
+  }, [isMainLocal]);
 
   // Bind PIP video stream safely
   useEffect(() => {
@@ -108,12 +136,21 @@ export const WhatsAppTwoPartyView: React.FC<WhatsAppTwoPartyViewProps> = ({
         if (videoEl.srcObject !== pipStream) {
           videoEl.srcObject = pipStream;
         }
-        videoEl.play().catch(() => {});
+        const playPromise = videoEl.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            console.warn('Autoplay blocked on pip video:', err);
+            if (!isPipLocal) {
+              videoEl.muted = true;
+              videoEl.play().catch(() => {});
+            }
+          });
+        }
       }
     } catch {
       // ignore
     }
-  }, [pipStream, isSwapped]);
+  }, [pipStream, isSwapped, isPipLocal]);
 
   // Compute corner positions safely
   const getCornerPosition = useCallback(
@@ -310,6 +347,15 @@ export const WhatsAppTwoPartyView: React.FC<WhatsAppTwoPartyViewProps> = ({
           autoPlay
           playsInline
           muted={isMainLocal} // Mute local audio feedback
+          onCanPlay={(e) => {
+            const vid = e.currentTarget;
+            vid.play().catch(() => {
+              if (!isMainLocal) {
+                vid.muted = true;
+                vid.play().catch(() => {});
+              }
+            });
+          }}
           style={
             isMainLocal && (currentQuality === '144p' || currentQuality === '240p')
               ? { imageRendering: 'pixelated' }
@@ -374,6 +420,15 @@ export const WhatsAppTwoPartyView: React.FC<WhatsAppTwoPartyViewProps> = ({
           autoPlay
           playsInline
           muted={isPipLocal}
+          onCanPlay={(e) => {
+            const vid = e.currentTarget;
+            vid.play().catch(() => {
+              if (!isPipLocal) {
+                vid.muted = true;
+                vid.play().catch(() => {});
+              }
+            });
+          }}
           className={`w-full h-full object-cover pointer-events-none transition-opacity duration-200 ${
             hasPipVideo ? 'opacity-100' : 'opacity-0 absolute'
           } ${isPipLocal && !pipParticipant.isScreenSharing ? 'scale-x-[-1]' : ''}`}

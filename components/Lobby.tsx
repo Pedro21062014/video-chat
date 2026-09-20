@@ -216,14 +216,14 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
     setIsCreatingMeeting(true);
     setRoomError(null);
 
-    // 1. Verify active calls limit per IP (max 5)
+    // 1. Verify active calls limit per IP (max 3 devices) - only applies to starting a new meeting
     try {
-      const checkRes = await fetch('/api/calls-limit');
+      const checkRes = await fetch('/api/calls-limit?action=new_room');
       const checkData = await checkRes.json();
       if (!checkData.allowed) {
         setRoomError(
           checkData.message ||
-            'O servidor está sobrecarregado. Limite de 5 chamadas ativas por IP atingido. Por favor, aguarde alguns instantes e tente novamente.'
+            'O servidor está sobrecarregado. Por favor, aguarde um pouco antes de iniciar a próxima ligação.'
         );
         sound.playHangup();
         setIsCreatingMeeting(false);
@@ -247,24 +247,9 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
     setIsJoiningMeeting(true);
 
     try {
-      // 1. Verify active calls limit per IP (max 5)
-      try {
-        const checkRes = await fetch('/api/calls-limit');
-        const checkData = await checkRes.json();
-        if (!checkData.allowed) {
-          setRoomError(
-            checkData.message ||
-              'O servidor está sobrecarregado. Limite de 5 chamadas ativas por IP atingido. Por favor, aguarde alguns instantes e tente novamente.'
-          );
-          sound.playHangup();
-          setIsJoiningMeeting(false);
-          return;
-        }
-      } catch {
-        // Continue
-      }
+      // Participants joining an existing meeting are NOT blocked by the IP limit (only applies to new meetings)
 
-      // 2. Extract clean room code from text or URL
+      // 1. Extract clean room code from text or URL
       let cleanCode = targetRoomId.trim();
       if (cleanCode.includes('room=')) {
         try {
@@ -283,7 +268,7 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
         return;
       }
 
-      // 3. Query Firestore to verify room existence
+      // 2. Query Firestore to verify room existence
       const roomRef = doc(db, 'rooms', cleanCode);
       const snap = await getDoc(roomRef);
 
@@ -302,7 +287,7 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
         return;
       }
 
-      // 4. Valid room exists - proceed to join
+      // 3. Valid room exists - proceed to join
       const finalName = displayName.trim() || DEFAULT_PARTICIPANT_NAME;
       isTransitioningToRoomRef.current = true;
       sound.playJoin();
@@ -380,7 +365,7 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
             >
               <AlertCircle className="w-4 h-4 text-[#ea4335] shrink-0 mt-0.5" />
               <div className="flex flex-col">
-                <span className="font-medium text-white text-xs">Aviso de sala</span>
+                <span className="font-medium text-white text-xs">Aviso</span>
                 <span className="text-xs text-[#f28b82]">{roomError}</span>
               </div>
             </div>

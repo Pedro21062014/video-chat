@@ -18,6 +18,23 @@ const RTC_CONFIG: RTCConfiguration = {
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:openrelay.metered.ca:80' },
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelay',
+      credential: 'openrelay',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelay',
+      credential: 'openrelay',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelay',
+      credential: 'openrelay',
+    },
   ],
   iceCandidatePoolSize: 10,
 };
@@ -72,22 +89,40 @@ export class PeerConnectionManager {
     }
   }
 
-  setLocalStream(stream: MediaStream | null) {
+  async setLocalStream(stream: MediaStream | null) {
     this.localStream = stream;
-    // Update tracks in active peer connections
-    this.peerConnections.forEach((pc) => {
+    if (!stream) return;
+
+    // Update tracks in all active peer connections
+    for (const [peerId, pc] of this.peerConnections) {
+      if (pc.connectionState === 'closed') continue;
+
+      let renegNeeded = false;
       const senders = pc.getSenders();
-      if (stream) {
-        stream.getTracks().forEach(async (track) => {
-          const sender = senders.find((s) => s.track?.kind === track.kind);
-          if (sender) {
+
+      for (const track of stream.getTracks()) {
+        const sender = senders.find((s) => s.track?.kind === track.kind || (!s.track && (s as unknown as { track: MediaStreamTrack | null }).track === null));
+        if (sender) {
+          try {
             await sender.replaceTrack(track);
-          } else {
-            pc.addTrack(track, stream);
+          } catch {
+            // fallback
           }
-        });
+        } else {
+          try {
+            pc.addTrack(track, stream);
+            renegNeeded = true;
+          } catch {
+            // ignore
+          }
+        }
       }
-    });
+
+      // If new tracks were added and peer connection is stable, renegotiate
+      if (renegNeeded && pc.signalingState === 'stable') {
+        this.connectToPeer(peerId).catch(() => {});
+      }
+    }
 
     if (this.currentQualityOption) {
       this.applyVideoQuality(this.currentQualityOption).catch(() => {});
@@ -104,7 +139,7 @@ export class PeerConnectionManager {
       this.peerConnections.forEach((pc) => {
         const videoSender = pc.getSenders().find((s) => s.track?.kind === 'video');
         if (videoSender) {
-          videoSender.replaceTrack(videoTrack);
+          videoSender.replaceTrack(videoTrack).catch(() => {});
         }
       });
     }
@@ -147,48 +182,33 @@ export class PeerConnectionManager {
     pc = new RTCPeerConnection(RTC_CONFIG);
     this.peerConnections.set(peerId, pc);
 
-    // Add local tracks
+    // Pre-allocate transceivers in sendrecv mode so SDP offer/answer negotiates audio & video upfront
+    // even if mobile camera/mic hardware takes a few moments to finish opening!
+    try {
+      if (pc.getTransceivers().length === 0) {
+        pc.addTransceiver('audio', { direction: 'sendrecv' });
+        pc.addTransceiver('video', { direction: 'sendrecv' });
+      }
+    } catch {
+      // ignore
+    }
+
+    // Attach local tracks if already available
     const activeStream = this.screenStream || this.localStream;
     if (activeStream) {
-      activeStream.getTracks().forEach((track) => {
-        const sender = pc!.addTrack(track, activeStream);
-        if (track.kind === 'video' && this.currentQualityOption) {
+      const senders = pc.getSenders();
+      for (const track of activeStream.getTracks()) {
+        const sender = senders.find((s) => s.track?.kind === track.kind || (!s.track && (s as unknown as { track: MediaStreamTrack | null }).track === null));
+        if (sender) {
+          sender.replaceTrack(track).catch(() => {});
+        } else {
           try {
-            const params = sender.getParameters();
-            if (!params.encodings || params.encodings.length === 0) {
-              params.encodings = [{}];
-            }
-            params.encodings[0].maxBitrate = this.currentQualityOption.bitrate;
-            params.encodings[0].maxFramerate = this.currentQualityOption.frameRate;
-            if (this.currentQualityOption.scaleResolutionDownBy > 1) {
-              params.encodings[0].scaleResolutionDownBy = this.currentQualityOption.scaleResolutionDownBy;
-            }
-            sender.setParameters(params);
+            pc.addTrack(track, activeStream);
           } catch {
             // ignore
           }
         }
-      });
-    } else if (this.localStream) {
-      this.localStream.getTracks().forEach((track) => {
-        const sender = pc!.addTrack(track, this.localStream!);
-        if (track.kind === 'video' && this.currentQualityOption) {
-          try {
-            const params = sender.getParameters();
-            if (!params.encodings || params.encodings.length === 0) {
-              params.encodings = [{}];
-            }
-            params.encodings[0].maxBitrate = this.currentQualityOption.bitrate;
-            params.encodings[0].maxFramerate = this.currentQualityOption.frameRate;
-            if (this.currentQualityOption.scaleResolutionDownBy > 1) {
-              params.encodings[0].scaleResolutionDownBy = this.currentQualityOption.scaleResolutionDownBy;
-            }
-            sender.setParameters(params);
-          } catch {
-            // ignore
-          }
-        }
-      });
+      }
     }
 
     // Handle ICE candidates
@@ -203,7 +223,9 @@ export class PeerConnectionManager {
       let stream = this.remoteStreams.get(peerId);
       if (!stream) {
         stream = new MediaStream();
+        this.remoteStreams.set(peerId, stream);
       }
+
       if (event.streams && event.streams[0]) {
         event.streams[0].getTracks().forEach((track) => {
           if (!stream!.getTracks().some((t) => t.id === track.id)) {
@@ -216,7 +238,7 @@ export class PeerConnectionManager {
         }
       }
 
-      // Clone a fresh stream reference with current tracks to trigger React state updates
+      // Clone a fresh stream reference with current tracks to trigger React state updates reliably
       const updatedStream = new MediaStream(stream.getTracks());
       this.remoteStreams.set(peerId, updatedStream);
 
@@ -226,10 +248,21 @@ export class PeerConnectionManager {
     };
 
     pc.onconnectionstatechange = () => {
-      if (pc!.connectionState === 'disconnected' || pc!.connectionState === 'failed' || pc!.connectionState === 'closed') {
-        if (this.onPeerDisconnectCallback) {
-          this.onPeerDisconnectCallback(peerId);
+      if (pc!.connectionState === 'failed') {
+        try {
+          pc!.restartIce();
+          this.connectToPeer(peerId).catch(() => {});
+        } catch {
+          // ignore
         }
+      } else if (pc!.connectionState === 'disconnected' || pc!.connectionState === 'closed') {
+        setTimeout(() => {
+          if (pc!.connectionState === 'disconnected' || pc!.connectionState === 'closed') {
+            if (this.onPeerDisconnectCallback) {
+              this.onPeerDisconnectCallback(peerId);
+            }
+          }
+        }, 3000);
       }
     };
 
@@ -289,6 +322,18 @@ export class PeerConnectionManager {
 
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
         await this.flushPendingCandidates(from, pc);
+
+        // Attach local tracks to senders before answering
+        const activeStream = this.screenStream || this.localStream;
+        if (activeStream) {
+          const senders = pc.getSenders();
+          for (const track of activeStream.getTracks()) {
+            const sender = senders.find((s) => s.track?.kind === track.kind || (!s.track && (s as unknown as { track: MediaStreamTrack | null }).track === null));
+            if (sender) {
+              await sender.replaceTrack(track);
+            }
+          }
+        }
 
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);

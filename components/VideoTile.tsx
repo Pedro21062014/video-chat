@@ -67,7 +67,11 @@ export const VideoTile: React.FC<VideoTileProps> = ({
         videoEl.srcObject = stream;
       }
       videoEl.play().catch(() => {
-        // Autoplay policy fallback
+        // Autoplay policy fallback: on mobile, if unmuted play fails, mute temporarily so video displays
+        if (!isLocal) {
+          videoEl.muted = true;
+          videoEl.play().catch(() => {});
+        }
       });
     }
 
@@ -76,7 +80,12 @@ export const VideoTile: React.FC<VideoTileProps> = ({
     const handleTrackChange = () => {
       setTrackState((prev) => prev + 1);
       if (videoEl && stream) {
-        videoEl.play().catch(() => {});
+        videoEl.play().catch(() => {
+          if (!isLocal) {
+            videoEl.muted = true;
+            videoEl.play().catch(() => {});
+          }
+        });
       }
     };
 
@@ -95,7 +104,7 @@ export const VideoTile: React.FC<VideoTileProps> = ({
         track.removeEventListener('mute', handleTrackChange);
       });
     };
-  }, [stream]);
+  }, [stream, isLocal]);
 
   const handleContextMenu = (e: React.MouseEvent) => {
     if (!isLocal) return;
@@ -143,8 +152,26 @@ export const VideoTile: React.FC<VideoTileProps> = ({
     }
   };
 
+  // Auto unmute remote video when user taps screen on mobile
+  useEffect(() => {
+    if (isLocal) return;
+    const handleTouch = () => {
+      const videoEl = videoRef.current;
+      if (videoEl && videoEl.muted) {
+        videoEl.muted = false;
+        videoEl.play().catch(() => {});
+      }
+    };
+    window.addEventListener('touchstart', handleTouch, { passive: true });
+    window.addEventListener('click', handleTouch);
+    return () => {
+      window.removeEventListener('touchstart', handleTouch);
+      window.removeEventListener('click', handleTouch);
+    };
+  }, [isLocal]);
+
   const videoTracks = stream ? stream.getVideoTracks() : [];
-  const activeVideoTrack = videoTracks.find((t) => t.readyState === 'live');
+  const activeVideoTrack = videoTracks.find((t) => t.readyState !== 'ended');
   const hasVideo = !participant.isVideoMuted && Boolean(activeVideoTrack);
 
   return (
@@ -164,6 +191,15 @@ export const VideoTile: React.FC<VideoTileProps> = ({
         autoPlay
         playsInline
         muted={isLocal} // Always mute local
+        onCanPlay={(e) => {
+          const vid = e.currentTarget;
+          vid.play().catch(() => {
+            if (!isLocal) {
+              vid.muted = true;
+              vid.play().catch(() => {});
+            }
+          });
+        }}
         style={
           isLocal && (currentQuality === '144p' || currentQuality === '240p')
             ? { imageRendering: 'pixelated' }

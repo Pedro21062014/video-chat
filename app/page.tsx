@@ -34,6 +34,7 @@ import { MiniCallWindow } from '@/components/MiniCallWindow';
 import { CameraSettingsModal } from '@/components/CameraSettingsModal';
 import { WhatsAppTwoPartyView } from '@/components/WhatsAppTwoPartyView';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { Info, Copy, Check, LayoutGrid } from 'lucide-react';
 
 const AVATAR_COLORS = [
@@ -75,6 +76,10 @@ export default function MeetingApp() {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
+  const remoteStreamsRef = useRef<Map<string, MediaStream>>(new Map());
+  useEffect(() => {
+    remoteStreamsRef.current = remoteStreams;
+  }, [remoteStreams]);
 
   // Firestore Room Realtime State
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -89,6 +94,7 @@ export default function MeetingApp() {
   const [copiedLinkBanner, setCopiedLinkBanner] = useState(false);
   const [pipTrigger, setPipTrigger] = useState(0);
   const [twoPartyViewMode, setTwoPartyViewMode] = useState<'whatsapp' | 'grid'>('whatsapp');
+  const isMobile = useIsMobile();
 
   const webrtcManagerRef = useRef<PeerConnectionManager | null>(null);
 
@@ -309,7 +315,7 @@ export default function MeetingApp() {
       fetch('/api/calls-limit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'join', roomId: targetRoom, userId }),
+        body: JSON.stringify({ action: 'join', roomId: targetRoom, userId, isNewRoom: Boolean(isNewRoom) }),
       }).catch(() => {});
     }
 
@@ -443,45 +449,79 @@ export default function MeetingApp() {
         if (!isNewRoom) {
           try {
             const roomSnap = await getDoc(roomRef);
-            const roomData = roomSnap.data();
-            userIsHost = Boolean(!roomSnap.exists() || roomData?.status === 'ended' || roomData?.hostId === userId);
-            setIsHost(userIsHost);
+            if (roomSnap.exists()) {
+              const roomData = roomSnap.data();
+              // A participant joining an existing room is ONLY host if they are the original host
+              userIsHost = Boolean(roomData?.hostId && roomData.hostId === userId);
+            } else {
+              userIsHost = false;
+            }
           } catch {
-            // ignore
+            userIsHost = false;
           }
+          setIsHost(userIsHost);
+        } else {
+          setIsHost(true);
         }
 
         const randomColor = AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
         const participantRef = doc(db, 'rooms', targetRoom, 'participants', userId);
 
-        await Promise.all([
-          setDoc(
-            roomRef,
-            {
-              id: targetRoom,
-              title: `Sala ${targetRoom}`,
-              hostId: userIsHost ? userId : userId,
-              createdBy: userIsHost ? userId : userId,
-              hostName: finalName,
-              lastActive: Date.now(),
-              status: 'active',
-              endedAt: null, // Clear any past endedAt
-            },
-            { merge: true }
-          ),
-          setDoc(participantRef, {
-            userId,
-            displayName: finalName,
-            isAudioMuted: initialAudioMuted,
-            isVideoMuted: initialVideoMuted,
-            isScreenSharing: false,
-            isHandRaised: false,
-            joinedAt: Date.now(),
-            lastSeen: Date.now(),
-            role: userIsHost ? 'host' : 'guest',
-            avatarColor: randomColor,
-          }),
-        ]);
+        if (userIsHost) {
+          // Host creates or reclaims room
+          await Promise.all([
+            setDoc(
+              roomRef,
+              {
+                id: targetRoom,
+                title: `Sala ${targetRoom}`,
+                hostId: userId,
+                createdBy: userId,
+                hostName: finalName,
+                lastActive: Date.now(),
+                status: 'active',
+                endedAt: null,
+              },
+              { merge: true }
+            ),
+            setDoc(participantRef, {
+              userId,
+              displayName: finalName,
+              isAudioMuted: initialAudioMuted,
+              isVideoMuted: initialVideoMuted,
+              isScreenSharing: false,
+              isHandRaised: false,
+              joinedAt: Date.now(),
+              lastSeen: Date.now(),
+              role: 'host',
+              avatarColor: randomColor,
+            }),
+          ]);
+        } else {
+          // Participant joining existing room NEVER overrides hostId
+          await Promise.all([
+            setDoc(
+              roomRef,
+              {
+                lastActive: Date.now(),
+                status: 'active',
+              },
+              { merge: true }
+            ),
+            setDoc(participantRef, {
+              userId,
+              displayName: finalName,
+              isAudioMuted: initialAudioMuted,
+              isVideoMuted: initialVideoMuted,
+              isScreenSharing: false,
+              isHandRaised: false,
+              joinedAt: Date.now(),
+              lastSeen: Date.now(),
+              role: 'guest',
+              avatarColor: randomColor,
+            }),
+          ]);
+        }
       } catch {
         // ignore
       }
@@ -549,6 +589,12 @@ export default function MeetingApp() {
 
   // End Call for Everyone (Host Action)
   const handleEndCallForEveryone = async () => {
+    // Strictly forbid non-hosts/guests from ending the meeting for everyone
+    if (!isHost) {
+      await handleLeaveCall();
+      return;
+    }
+
     sound.playHangup();
 
     const targetRoomId = roomId;
@@ -663,15 +709,22 @@ export default function MeetingApp() {
       });
       setParticipants(list);
 
-      // Connect to any new peer that joined (deterministic initiator)
+      // Connect to any new peer that joined (deterministic initiator + mobile network watchdog)
       list.forEach((p) => {
         if (p.userId !== currentUserId && webrtcManagerRef.current) {
           if (!connectedPeersRef.current.has(p.userId)) {
             connectedPeersRef.current.add(p.userId);
-            // Deterministic initiator: only peer with greater userId initiates offer
+            // Deterministic initiator: peer with greater userId initiates offer
             if (currentUserId > p.userId) {
               webrtcManagerRef.current.connectToPeer(p.userId);
             }
+
+            // Mobile network watchdog: if no stream received after 2.5s, trigger connect attempt to ensure handshake completes
+            setTimeout(() => {
+              if (webrtcManagerRef.current && !remoteStreamsRef.current.has(p.userId)) {
+                webrtcManagerRef.current.connectToPeer(p.userId);
+              }
+            }, 2500);
           }
         }
       });
@@ -976,6 +1029,15 @@ export default function MeetingApp() {
   else if (totalCount >= 5 && totalCount <= 6) gridColsClass = 'grid-cols-2 md:grid-cols-3';
   else if (totalCount > 6) gridColsClass = 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4';
 
+  // Desktop 2-party view: Left camera (local), Right camera (guest), EXACT same size and format, no small corner box
+  const isTwoParticipantsOnDesktop = !isMobile && totalCount === 2;
+  const shouldRenderWhatsAppView =
+    isMobile &&
+    totalCount === 2 &&
+    twoPartyViewMode === 'whatsapp' &&
+    uniqueRemoteParticipants.length > 0 &&
+    Boolean(uniqueRemoteParticipants[0]);
+
   return (
     <ErrorBoundary
       fallbackTitle="Interface da Chamada Protegida"
@@ -1013,7 +1075,7 @@ export default function MeetingApp() {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-[#9aa0a6]">
-          {totalCount === 2 && (
+          {totalCount === 2 && isMobile && (
             <button
               id="btn-toggle-two-party-view"
               onClick={() => setTwoPartyViewMode((prev) => (prev === 'whatsapp' ? 'grid' : 'whatsapp'))}
@@ -1030,8 +1092,8 @@ export default function MeetingApp() {
         </div>
       </header>
 
-      {/* Main Video Area: If exactly 2 participants and WhatsApp mode is active, render WhatsAppTwoPartyView */}
-      {totalCount === 2 && twoPartyViewMode === 'whatsapp' && uniqueRemoteParticipants.length > 0 && uniqueRemoteParticipants[0] ? (
+      {/* Main Video Area: On Mobile if WhatsApp mode is selected, render WhatsAppTwoPartyView. On PC, always render side-by-side in same format */}
+      {shouldRenderWhatsAppView ? (
         <ErrorBoundary
           fallbackTitle="Visualização Restaurada"
           fallbackDescription="A visualização estilo WhatsApp encontrou uma instabilidade gráfica e foi revertida com segurança para a grade padrão."
@@ -1048,10 +1110,14 @@ export default function MeetingApp() {
           />
         </ErrorBoundary>
       ) : (
-        /* Main Video Tiles Grid Container (flex-1 min-h-0 prevents pushing the bottom bar offscreen) */
+        /* Main Video Tiles Grid Container */
         <main
           id="video-tiles-grid"
-          className={`relative flex-1 min-h-0 p-2 sm:p-4 md:p-5 grid ${gridColsClass} gap-2.5 sm:gap-4 items-center justify-center auto-rows-fr max-w-7xl mx-auto w-full overflow-hidden transition-all duration-200`}
+          className={`relative flex-1 min-h-0 p-2 sm:p-4 md:p-5 ${
+            isTwoParticipantsOnDesktop
+              ? 'grid grid-cols-2 gap-3 sm:gap-5 md:gap-6 items-center justify-center max-w-6xl mx-auto w-full h-full'
+              : `grid ${gridColsClass} gap-2.5 sm:gap-4 items-center justify-center auto-rows-fr max-w-7xl mx-auto w-full`
+          } overflow-hidden transition-all duration-200`}
         >
           {totalCount === 1 && (
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-[#202124]/90 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-[#3c4043] flex items-center gap-2.5 text-xs text-[#e8eaed] shadow-lg">
