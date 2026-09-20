@@ -286,7 +286,7 @@ export default function MeetingApp() {
     existingStream?: MediaStream | null
   ) => {
     const finalName = (userName && userName.trim()) || 'Participante';
-    const userId = 'user_' + Math.random().toString(36).substring(2, 9);
+    const userId = 'usr' + Math.random().toString(36).substring(2, 10);
     meetingStartTimeRef.current = Date.now();
     setCurrentUserId(userId);
     setDisplayName(finalName);
@@ -329,11 +329,11 @@ export default function MeetingApp() {
     );
 
     webrtcManagerRef.current = rtc;
-    rtc.startListening();
+    rtc.startListening(existingStream && !initialVideoMuted ? existingStream : null);
 
-    // 1. If starting a brand new meeting, clean up ephemeral leftovers WITHOUT setting status: 'ended'
+    // 1. If starting a brand new meeting, clean up ephemeral leftovers (excluding active user)
     if (isNewRoom) {
-      clearEphemeralRoomData(targetRoom).catch(() => {});
+      clearEphemeralRoomData(targetRoom, userId).catch(() => {});
     }
 
     // 2. Concurrently get User Media with chosen quality without blocking room render
@@ -699,18 +699,13 @@ export default function MeetingApp() {
       });
       setParticipants(list);
 
-      // Connect to any new peer that joined (deterministic initiator)
-      list.forEach((p) => {
-        if (p.userId !== currentUserId && webrtcManagerRef.current) {
-          if (!connectedPeersRef.current.has(p.userId)) {
-            connectedPeersRef.current.add(p.userId);
-            // Deterministic initiator: peer with greater userId initiates offer
-            if (currentUserId > p.userId) {
-              webrtcManagerRef.current.connectToPeer(p.userId);
-            }
-          }
-        }
-      });
+      // Synchronize and supervise active WebRTC peer connections
+      if (webrtcManagerRef.current) {
+        const remoteUserIds = list
+          .map((p) => p.userId)
+          .filter((id) => id && id !== currentUserId);
+        webrtcManagerRef.current.syncParticipants(remoteUserIds);
+      }
     });
 
     // 2. Listen to chat messages

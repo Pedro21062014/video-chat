@@ -14,7 +14,7 @@ import { Participant } from './types';
  * WITHOUT touching or altering the room's status.
  * This is used when a new meeting starts or is reset, so it never prematurely ends a call.
  */
-export async function clearEphemeralRoomData(roomId: string): Promise<void> {
+export async function clearEphemeralRoomData(roomId: string, excludeUserId?: string): Promise<void> {
   if (!roomId) return;
 
   try {
@@ -30,6 +30,9 @@ export async function clearEphemeralRoomData(roomId: string): Promise<void> {
           let count = 0;
 
           for (const docSnap of snapshot.docs) {
+            if (subcol === 'participants' && excludeUserId && docSnap.id === excludeUserId) {
+              continue; // Keep the active user's participant document
+            }
             batch.delete(docSnap.ref);
             count++;
             if (count % 450 === 0) {
@@ -38,7 +41,7 @@ export async function clearEphemeralRoomData(roomId: string): Promise<void> {
             }
           }
 
-          if (count % 450 !== 0) {
+          if (count > 0 && count % 450 !== 0) {
             await batch.commit();
           }
         }
