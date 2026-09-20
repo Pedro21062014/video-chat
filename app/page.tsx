@@ -33,6 +33,7 @@ import { Lobby } from '@/components/Lobby';
 import { MiniCallWindow } from '@/components/MiniCallWindow';
 import { CameraSettingsModal } from '@/components/CameraSettingsModal';
 import { WhatsAppTwoPartyView } from '@/components/WhatsAppTwoPartyView';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Info, Copy, Check, LayoutGrid } from 'lucide-react';
 
 const AVATAR_COLORS = [
@@ -46,27 +47,7 @@ const AVATAR_COLORS = [
 
 export default function MeetingApp() {
   const [isInRoom, setIsInRoom] = useState(false);
-  const [roomId, setRoomId] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      const navEntries = performance.getEntriesByType('navigation');
-      const isReload =
-        navEntries.length > 0 &&
-        (navEntries[0] as PerformanceNavigationTiming).type === 'reload';
-
-      if (isReload) {
-        const url = new URL(window.location.href);
-        if (url.searchParams.has('room')) {
-          url.searchParams.delete('room');
-          window.history.replaceState({}, '', url.pathname);
-        }
-        return '';
-      }
-
-      const params = new URLSearchParams(window.location.search);
-      return (params.get('room') || '').toLowerCase();
-    }
-    return '';
-  });
+  const [roomId, setRoomId] = useState<string>('');
   const [currentUserId, setCurrentUserId] = useState<string>('');
   const [displayName, setDisplayName] = useState<string>('');
   const [isHost, setIsHost] = useState(false);
@@ -111,28 +92,58 @@ export default function MeetingApp() {
 
   const webrtcManagerRef = useRef<PeerConnectionManager | null>(null);
 
-  // Clean up server-side and storage sessions if page was reloaded
+  // Safe Client Initialization: Detect URL parameter and handle reloads without crashing hydration
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    if (typeof window === 'undefined') return;
+
+    try {
       const navEntries = performance.getEntriesByType('navigation');
       const isReload =
         navEntries.length > 0 &&
         (navEntries[0] as PerformanceNavigationTiming).type === 'reload';
 
       if (isReload) {
-        const lastActiveRoom = sessionStorage.getItem('active_call_room');
-        const lastActiveUser = sessionStorage.getItem('active_call_user');
-        if (lastActiveRoom && lastActiveUser) {
-          deleteDoc(doc(db, 'rooms', lastActiveRoom, 'participants', lastActiveUser)).catch(() => {});
-          fetch('/api/calls-limit', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'leave', roomId: lastActiveRoom, userId: lastActiveUser }),
-          }).catch(() => {});
+        try {
+          const url = new URL(window.location.href);
+          if (url.searchParams.has('room')) {
+            url.searchParams.delete('room');
+            window.history.replaceState({}, '', url.pathname);
+          }
+        } catch {
+          // ignore URL/history errors in sandboxed iframes
         }
-        sessionStorage.removeItem('active_call_room');
-        sessionStorage.removeItem('active_call_user');
+
+        try {
+          const lastActiveRoom = sessionStorage.getItem('active_call_room');
+          const lastActiveUser = sessionStorage.getItem('active_call_user');
+          if (lastActiveRoom && lastActiveUser) {
+            deleteDoc(doc(db, 'rooms', lastActiveRoom, 'participants', lastActiveUser)).catch(() => {});
+            fetch('/api/calls-limit', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'leave', roomId: lastActiveRoom, userId: lastActiveUser }),
+            }).catch(() => {});
+          }
+          sessionStorage.removeItem('active_call_room');
+          sessionStorage.removeItem('active_call_user');
+        } catch {
+          // ignore
+        }
+        // roomId is already '' by default
+        return;
       }
+
+      // Normal load: check query parameter ?room=...
+      const params = new URLSearchParams(window.location.search);
+      const queryRoom = (params.get('room') || '').toLowerCase().trim();
+      if (queryRoom) {
+        const timer = setTimeout(() => {
+          setRoomId(queryRoom);
+        }, 0);
+        return () => clearTimeout(timer);
+      }
+    } catch (err) {
+      console.warn('Safe client init warning:', err);
     }
   }, []);
 
@@ -904,11 +915,21 @@ export default function MeetingApp() {
   // If not inside a room, render Lobby
   if (!isInRoom) {
     return (
-      <Lobby
-        initialRoomId={roomId}
-        onJoinRoom={handleJoinRoom}
-        notificationMessage={notificationMessage}
-      />
+      <ErrorBoundary
+        fallbackTitle="Lobby Protegido"
+        fallbackDescription="O lobby encontrou uma instabilidade temporária e foi restaurado com segurança."
+        onReset={() => {
+          setIsInRoom(false);
+          setRoomId('');
+        }}
+      >
+        <Lobby
+          key={roomId || 'lobby-root'}
+          initialRoomId={roomId}
+          onJoinRoom={handleJoinRoom}
+          notificationMessage={notificationMessage}
+        />
+      </ErrorBoundary>
     );
   }
 
@@ -956,7 +977,14 @@ export default function MeetingApp() {
   else if (totalCount > 6) gridColsClass = 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4';
 
   return (
-    <div className="relative h-screen h-[100dvh] w-screen max-w-full bg-[#202124] text-[#e8eaed] flex flex-col overflow-hidden select-none">
+    <ErrorBoundary
+      fallbackTitle="Interface da Chamada Protegida"
+      fallbackDescription="A interface da chamada detectou uma instabilidade e foi protegida com segurança."
+      onReset={() => {
+        setTwoPartyViewMode('grid');
+      }}
+    >
+      <div className="relative h-screen h-[100dvh] w-screen max-w-full bg-[#202124] text-[#e8eaed] flex flex-col overflow-hidden select-none">
       {/* Top Header Bar with VideoMeet Logo, Room ID and Clock */}
       <header className="h-12 sm:h-14 px-3 sm:px-6 flex items-center justify-between shrink-0 z-20 border-b border-[#3c4043]/40 bg-[#202124]">
         <div className="flex items-center gap-2.5 sm:gap-3">
@@ -1003,16 +1031,22 @@ export default function MeetingApp() {
       </header>
 
       {/* Main Video Area: If exactly 2 participants and WhatsApp mode is active, render WhatsAppTwoPartyView */}
-      {totalCount === 2 && twoPartyViewMode === 'whatsapp' ? (
-        <WhatsAppTwoPartyView
-          localParticipant={localParticipant}
-          remoteParticipant={uniqueRemoteParticipants[0]}
-          localStream={activeTileStream}
-          remoteStream={remoteStreams.get(uniqueRemoteParticipants[0].userId) || null}
-          currentQuality={videoQuality}
-          onOpenSettings={() => setIsCameraSettingsOpen(true)}
-          onToggleVideo={handleToggleVideo}
-        />
+      {totalCount === 2 && twoPartyViewMode === 'whatsapp' && uniqueRemoteParticipants.length > 0 && uniqueRemoteParticipants[0] ? (
+        <ErrorBoundary
+          fallbackTitle="Visualização Restaurada"
+          fallbackDescription="A visualização estilo WhatsApp encontrou uma instabilidade gráfica e foi revertida com segurança para a grade padrão."
+          onReset={() => setTwoPartyViewMode('grid')}
+        >
+          <WhatsAppTwoPartyView
+            localParticipant={localParticipant}
+            remoteParticipant={uniqueRemoteParticipants[0]}
+            localStream={activeTileStream}
+            remoteStream={remoteStreams.get(uniqueRemoteParticipants[0].userId) || null}
+            currentQuality={videoQuality}
+            onOpenSettings={() => setIsCameraSettingsOpen(true)}
+            onToggleVideo={handleToggleVideo}
+          />
+        </ErrorBoundary>
       ) : (
         /* Main Video Tiles Grid Container (flex-1 min-h-0 prevents pushing the bottom bar offscreen) */
         <main
@@ -1127,6 +1161,7 @@ export default function MeetingApp() {
         participants={participants}
         currentUserId={currentUserId}
       />
-    </div>
+      </div>
+    </ErrorBoundary>
   );
 }
