@@ -32,7 +32,8 @@ import { FloatingReactions } from '@/components/FloatingReactions';
 import { Lobby } from '@/components/Lobby';
 import { MiniCallWindow } from '@/components/MiniCallWindow';
 import { CameraSettingsModal } from '@/components/CameraSettingsModal';
-import { Info, Copy, Check } from 'lucide-react';
+import { WhatsAppTwoPartyView } from '@/components/WhatsAppTwoPartyView';
+import { Info, Copy, Check, LayoutGrid } from 'lucide-react';
 
 const AVATAR_COLORS = [
   '#3b82f6', // blue
@@ -47,6 +48,20 @@ export default function MeetingApp() {
   const [isInRoom, setIsInRoom] = useState(false);
   const [roomId, setRoomId] = useState<string>(() => {
     if (typeof window !== 'undefined') {
+      const navEntries = performance.getEntriesByType('navigation');
+      const isReload =
+        navEntries.length > 0 &&
+        (navEntries[0] as PerformanceNavigationTiming).type === 'reload';
+
+      if (isReload) {
+        const url = new URL(window.location.href);
+        if (url.searchParams.has('room')) {
+          url.searchParams.delete('room');
+          window.history.replaceState({}, '', url.pathname);
+        }
+        return '';
+      }
+
       const params = new URLSearchParams(window.location.search);
       return (params.get('room') || '').toLowerCase();
     }
@@ -92,8 +107,34 @@ export default function MeetingApp() {
   const [currentTime, setCurrentTime] = useState<string>('');
   const [copiedLinkBanner, setCopiedLinkBanner] = useState(false);
   const [pipTrigger, setPipTrigger] = useState(0);
+  const [twoPartyViewMode, setTwoPartyViewMode] = useState<'whatsapp' | 'grid'>('whatsapp');
 
   const webrtcManagerRef = useRef<PeerConnectionManager | null>(null);
+
+  // Clean up server-side and storage sessions if page was reloaded
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const navEntries = performance.getEntriesByType('navigation');
+      const isReload =
+        navEntries.length > 0 &&
+        (navEntries[0] as PerformanceNavigationTiming).type === 'reload';
+
+      if (isReload) {
+        const lastActiveRoom = sessionStorage.getItem('active_call_room');
+        const lastActiveUser = sessionStorage.getItem('active_call_user');
+        if (lastActiveRoom && lastActiveUser) {
+          deleteDoc(doc(db, 'rooms', lastActiveRoom, 'participants', lastActiveUser)).catch(() => {});
+          fetch('/api/calls-limit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'leave', roomId: lastActiveRoom, userId: lastActiveUser }),
+          }).catch(() => {});
+        }
+        sessionStorage.removeItem('active_call_room');
+        sessionStorage.removeItem('active_call_user');
+      }
+    }
+  }, []);
 
   // Clock in top left like Zoom / Meet
   useEffect(() => {
@@ -235,7 +276,8 @@ export default function MeetingApp() {
     initialAudioMuted: boolean,
     initialVideoMuted: boolean,
     selectedCameraId?: string,
-    isNewRoom?: boolean
+    isNewRoom?: boolean,
+    existingStream?: MediaStream | null
   ) => {
     const finalName = (userName && userName.trim()) || 'Participante';
     const userId = 'user_' + Math.random().toString(36).substring(2, 9);
@@ -248,6 +290,17 @@ export default function MeetingApp() {
     setNotificationMessage(null);
     connectedPeersRef.current.clear();
     setIsHost(Boolean(isNewRoom));
+
+    // Register active call session for IP rate limiting & reload recovery
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('active_call_room', targetRoom);
+      sessionStorage.setItem('active_call_user', userId);
+      fetch('/api/calls-limit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'join', roomId: targetRoom, userId }),
+      }).catch(() => {});
+    }
 
     // ⚡ INSTANT LAUNCH: Transition to conference view immediately
     setIsInRoom(true);
@@ -284,17 +337,59 @@ export default function MeetingApp() {
     // 2. Concurrently get User Media with chosen quality without blocking room render
     (async () => {
       try {
+        // A. If existingStream from Lobby is already live, seamlessly reuse it so camera never disappears!
+        if (existingStream && !initialVideoMuted) {
+          const liveVideoTrack = existingStream.getVideoTracks().find((t) => t.readyState === 'live');
+          if (liveVideoTrack) {
+            liveVideoTrack.enabled = !initialVideoMuted;
+            const newStream = new MediaStream([liveVideoTrack]);
+            localStreamRef.current = newStream;
+            setLocalStream(newStream);
+            rtc.setLocalStream(newStream);
+
+            // Acquire audio track if unmuted
+            if (!initialAudioMuted) {
+              try {
+                const audioMedia = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const audioTrack = audioMedia.getAudioTracks()[0];
+                if (audioTrack) {
+                  audioTrack.enabled = !initialAudioMuted;
+                  newStream.addTrack(audioTrack);
+                  rtc.setLocalStream(newStream);
+                  setLocalStream(new MediaStream(newStream.getTracks()));
+                }
+              } catch {
+                // Ignore audio error
+              }
+            }
+            return;
+          }
+        }
+
+        // B. Acquire fresh media stream
         const targetOpt = VIDEO_QUALITIES.find((q) => q.id === videoQuality) || VIDEO_QUALITIES[2];
         const constraints: MediaStreamConstraints = {
           audio: true,
-          video: {
-            ...(selectedCameraId ? { deviceId: { exact: selectedCameraId } } : { facingMode: 'user' }),
-            width: { ideal: targetOpt.width },
-            height: { ideal: targetOpt.height },
-            frameRate: { ideal: targetOpt.frameRate },
-          },
+          video: initialVideoMuted
+            ? false
+            : {
+                ...(selectedCameraId ? { deviceId: { exact: selectedCameraId } } : { facingMode: 'user' }),
+                width: { ideal: targetOpt.width },
+                height: { ideal: targetOpt.height },
+                frameRate: { ideal: targetOpt.frameRate },
+              },
         };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+        let stream: MediaStream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+        } catch {
+          // Fallback to standard audio + video
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: !initialVideoMuted,
+          });
+        }
 
         // Apply initial mute states to tracks
         stream.getAudioTracks().forEach((t) => {
@@ -312,7 +407,7 @@ export default function MeetingApp() {
           setActiveCameraId(selectedCameraId);
         }
       } catch {
-        // If mic/camera error, try audio-only or empty stream fallback
+        // Last fallback: audio only if camera is blocked/denied
         try {
           const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
           audioStream.getAudioTracks().forEach((t) => {
@@ -417,6 +512,17 @@ export default function MeetingApp() {
     setIsChatOpen(false);
     setIsParticipantsOpen(false);
 
+    // Release IP call limiter slot
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('active_call_room');
+      sessionStorage.removeItem('active_call_user');
+      fetch('/api/calls-limit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'leave', roomId: targetRoomId, userId: leavingUserId }),
+      }).catch(() => {});
+    }
+
     // Remove user participant from Firestore.
     // If no active participants remain, purge all chats, reactions, signals, and participants
     // while keeping room metadata intact!
@@ -448,13 +554,20 @@ export default function MeetingApp() {
     setNotificationMessage('Você encerrou a reunião para todos os participantes.');
   };
 
-  // Heartbeat to keep participant document active in Firestore & clean stale ghost participants
+  // Heartbeat to keep participant document active in Firestore & active IP calls slot active
   useEffect(() => {
     if (!isInRoom || !roomId || !currentUserId) return;
     const interval = setInterval(async () => {
       try {
         const pRef = doc(db, 'rooms', roomId, 'participants', currentUserId);
         await setDoc(pRef, { lastSeen: Date.now() }, { merge: true });
+
+        // Heartbeat to IP call limit
+        fetch('/api/calls-limit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'heartbeat', roomId, userId: currentUserId }),
+        }).catch(() => {});
 
         // Clean up any stale ghost participants that closed tab without leaving
         const pCol = collection(db, 'rooms', roomId, 'participants');
@@ -474,11 +587,18 @@ export default function MeetingApp() {
     return () => clearInterval(interval);
   }, [isInRoom, roomId, currentUserId]);
 
-  // Cleanup on window/tab close (beforeunload only)
+  // Cleanup on window/tab close (beforeunload and pagehide)
   useEffect(() => {
     if (!isInRoom || !roomId || !currentUserId) return;
 
     const handleUnload = () => {
+      try {
+        const payload = JSON.stringify({ action: 'leave', roomId, userId: currentUserId });
+        navigator.sendBeacon('/api/calls-limit', payload);
+      } catch {
+        // ignore
+      }
+
       try {
         const pRef = doc(db, 'rooms', roomId, 'participants', currentUserId);
         deleteDoc(pRef).catch(() => {});
@@ -488,9 +608,11 @@ export default function MeetingApp() {
     };
 
     window.addEventListener('beforeunload', handleUnload);
+    window.addEventListener('pagehide', handleUnload);
 
     return () => {
       window.removeEventListener('beforeunload', handleUnload);
+      window.removeEventListener('pagehide', handleUnload);
     };
   }, [isInRoom, roomId, currentUserId]);
 
@@ -862,29 +984,68 @@ export default function MeetingApp() {
           </button>
         </div>
 
-        <div className="flex items-center gap-3 text-xs sm:text-sm text-[#9aa0a6]">
+        <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-[#9aa0a6]">
+          {totalCount === 2 && (
+            <button
+              id="btn-toggle-two-party-view"
+              onClick={() => setTwoPartyViewMode((prev) => (prev === 'whatsapp' ? 'grid' : 'whatsapp'))}
+              title="Alternar entre modo WhatsApp e grade lado a lado"
+              className="px-2.5 py-1 rounded-full text-xs font-medium bg-[#3c4043]/60 hover:bg-[#3c4043] text-[#e8eaed] flex items-center gap-1.5 transition-colors cursor-pointer border border-[#3c4043]"
+            >
+              <LayoutGrid className="w-3.5 h-3.5 text-[#8ab4f8]" />
+              <span className="hidden sm:inline">
+                {twoPartyViewMode === 'whatsapp' ? 'Lado a lado' : 'Estilo WhatsApp'}
+              </span>
+            </button>
+          )}
           <span className="font-medium text-[#e8eaed]">{currentTime}</span>
         </div>
       </header>
 
-      {/* Main Video Tiles Grid Container (flex-1 min-h-0 prevents pushing the bottom bar offscreen) */}
-      <main
-        id="video-tiles-grid"
-        className={`flex-1 min-h-0 p-2 sm:p-4 md:p-5 grid ${gridColsClass} gap-2.5 sm:gap-4 items-center justify-center auto-rows-fr max-w-7xl mx-auto w-full overflow-hidden transition-all duration-200`}
-      >
-        {allTiles.map(({ participant, stream, isLocal }) => (
-          <VideoTile
-            key={participant.userId}
-            participant={participant}
-            stream={stream}
-            isLocal={isLocal}
-            isSpeaking={!participant.isAudioMuted}
-            onOpenSettings={isLocal ? () => setIsCameraSettingsOpen(true) : undefined}
-            onToggleVideo={isLocal ? handleToggleVideo : undefined}
-            currentQuality={isLocal ? videoQuality : undefined}
-          />
-        ))}
-      </main>
+      {/* Main Video Area: If exactly 2 participants and WhatsApp mode is active, render WhatsAppTwoPartyView */}
+      {totalCount === 2 && twoPartyViewMode === 'whatsapp' ? (
+        <WhatsAppTwoPartyView
+          localParticipant={localParticipant}
+          remoteParticipant={uniqueRemoteParticipants[0]}
+          localStream={activeTileStream}
+          remoteStream={remoteStreams.get(uniqueRemoteParticipants[0].userId) || null}
+          currentQuality={videoQuality}
+          onOpenSettings={() => setIsCameraSettingsOpen(true)}
+          onToggleVideo={handleToggleVideo}
+        />
+      ) : (
+        /* Main Video Tiles Grid Container (flex-1 min-h-0 prevents pushing the bottom bar offscreen) */
+        <main
+          id="video-tiles-grid"
+          className={`relative flex-1 min-h-0 p-2 sm:p-4 md:p-5 grid ${gridColsClass} gap-2.5 sm:gap-4 items-center justify-center auto-rows-fr max-w-7xl mx-auto w-full overflow-hidden transition-all duration-200`}
+        >
+          {totalCount === 1 && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-[#202124]/90 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-[#3c4043] flex items-center gap-2.5 text-xs text-[#e8eaed] shadow-lg">
+              <span className="w-2 h-2 rounded-full bg-[#81c995] animate-pulse" />
+              <span>Aguardando outros entrarem na reunião...</span>
+              <button
+                onClick={handleCopyLink}
+                className="text-[#8ab4f8] hover:text-white font-medium flex items-center gap-1 cursor-pointer transition-colors ml-1"
+              >
+                {copiedLinkBanner ? 'Copiado!' : 'Copiar link'}
+              </button>
+            </div>
+          )}
+
+          {allTiles.map(({ participant, stream, isLocal }) => (
+            <VideoTile
+              key={participant.userId}
+              participant={participant}
+              stream={stream}
+              isLocal={isLocal}
+              isSpeaking={!participant.isAudioMuted}
+              onOpenSettings={isLocal ? () => setIsCameraSettingsOpen(true) : undefined}
+              onToggleVideo={isLocal ? handleToggleVideo : undefined}
+              currentQuality={isLocal ? videoQuality : undefined}
+            />
+          ))}
+        </main>
+      )}
 
       {/* Floating Emoji Reactions Overlay */}
       <FloatingReactions reactions={floatingReactions} />

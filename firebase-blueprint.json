@@ -72,6 +72,19 @@
         "timestamp": { "type": "number" }
       },
       "required": ["from", "to", "type", "payload", "timestamp"]
+    },
+    "ip_active_calls": {
+      "title": "Active Call Session per IP",
+      "description": "Tracks active sessions per IP address to enforce the maximum of 5 concurrent calls per IP",
+      "type": "object",
+      "properties": {
+        "ip": { "type": "string" },
+        "userId": { "type": "string" },
+        "roomId": { "type": "string" },
+        "joinedAt": { "type": "number" },
+        "lastSeen": { "type": "number" }
+      },
+      "required": ["ip", "userId", "roomId", "joinedAt", "lastSeen"]
     }
   }
 }

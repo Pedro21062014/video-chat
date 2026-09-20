@@ -27,7 +27,8 @@ interface LobbyProps {
     initialAudioMuted: boolean,
     initialVideoMuted: boolean,
     selectedDeviceId?: string,
-    isNewRoom?: boolean
+    isNewRoom?: boolean,
+    existingStream?: MediaStream | null
   ) => void;
   notificationMessage?: string | null;
 }
@@ -50,6 +51,7 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewStreamRef = useRef<MediaStream | null>(null);
+  const isTransitioningToRoomRef = useRef(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
@@ -193,7 +195,8 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
 
     return () => {
       active = false;
-      if (previewStreamRef.current) {
+      // Do NOT destroy preview camera track if we are handing it off to the room
+      if (!isTransitioningToRoomRef.current && previewStreamRef.current) {
         previewStreamRef.current.getTracks().forEach((t) => t.stop());
         previewStreamRef.current = null;
       }
@@ -208,13 +211,33 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
     setSelectedCameraId(videoDevices[nextIndex].deviceId);
   };
 
-  const handleStartInstantMeeting = () => {
+  const handleStartInstantMeeting = async () => {
     if (isCreatingMeeting || isJoiningMeeting) return;
     setIsCreatingMeeting(true);
+    setRoomError(null);
+
+    // 1. Verify active calls limit per IP (max 5)
+    try {
+      const checkRes = await fetch('/api/calls-limit');
+      const checkData = await checkRes.json();
+      if (!checkData.allowed) {
+        setRoomError(
+          checkData.message ||
+            'O servidor está sobrecarregado. Limite de 5 chamadas ativas por IP atingido. Por favor, aguarde alguns instantes e tente novamente.'
+        );
+        sound.playHangup();
+        setIsCreatingMeeting(false);
+        return;
+      }
+    } catch {
+      // Proceed if check fails to not block users on network glitch
+    }
+
     const code = generateRoomCode();
     const finalName = displayName.trim() || DEFAULT_PARTICIPANT_NAME;
+    isTransitioningToRoomRef.current = true;
     sound.playJoin();
-    onJoinRoom(code, finalName, isAudioMuted, isVideoMuted, selectedCameraId, true);
+    onJoinRoom(code, finalName, isAudioMuted, isVideoMuted, selectedCameraId, true, previewStream);
   };
 
   const handleJoinExistingRoom = async (e: React.FormEvent) => {
@@ -224,7 +247,24 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
     setIsJoiningMeeting(true);
 
     try {
-      // 1. Extract clean room code from text or URL
+      // 1. Verify active calls limit per IP (max 5)
+      try {
+        const checkRes = await fetch('/api/calls-limit');
+        const checkData = await checkRes.json();
+        if (!checkData.allowed) {
+          setRoomError(
+            checkData.message ||
+              'O servidor está sobrecarregado. Limite de 5 chamadas ativas por IP atingido. Por favor, aguarde alguns instantes e tente novamente.'
+          );
+          sound.playHangup();
+          setIsJoiningMeeting(false);
+          return;
+        }
+      } catch {
+        // Continue
+      }
+
+      // 2. Extract clean room code from text or URL
       let cleanCode = targetRoomId.trim();
       if (cleanCode.includes('room=')) {
         try {
@@ -243,7 +283,7 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
         return;
       }
 
-      // 2. Query Firestore to verify room existence
+      // 3. Query Firestore to verify room existence
       const roomRef = doc(db, 'rooms', cleanCode);
       const snap = await getDoc(roomRef);
 
@@ -262,10 +302,11 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
         return;
       }
 
-      // 3. Valid room exists - proceed to join
+      // 4. Valid room exists - proceed to join
       const finalName = displayName.trim() || DEFAULT_PARTICIPANT_NAME;
+      isTransitioningToRoomRef.current = true;
       sound.playJoin();
-      onJoinRoom(cleanCode, finalName, isAudioMuted, isVideoMuted, selectedCameraId, false);
+      onJoinRoom(cleanCode, finalName, isAudioMuted, isVideoMuted, selectedCameraId, false, previewStream);
     } catch (err) {
       console.error('Erro ao verificar sala:', err);
       setRoomError('Não foi possível verificar a sala no momento. Tente novamente.');

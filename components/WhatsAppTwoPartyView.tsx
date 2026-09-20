@@ -1,0 +1,362 @@
+'use client';
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Participant, VideoQualityId } from '@/lib/types';
+import { MicOff, ArrowLeftRight } from 'lucide-react';
+
+interface WhatsAppTwoPartyViewProps {
+  localParticipant: Participant;
+  remoteParticipant: Participant;
+  localStream: MediaStream | null;
+  remoteStream: MediaStream | null;
+  currentQuality?: VideoQualityId;
+  onOpenSettings?: () => void;
+  onToggleVideo?: () => void;
+}
+
+type Corner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+
+export const WhatsAppTwoPartyView: React.FC<WhatsAppTwoPartyViewProps> = ({
+  localParticipant,
+  remoteParticipant,
+  localStream,
+  remoteStream,
+  currentQuality,
+}) => {
+  // isSwapped: false -> Main is Remote, PIP is Local (WhatsApp default)
+  // isSwapped: true  -> Main is Local, PIP is Remote
+  const [isSwapped, setIsSwapped] = useState(false);
+
+  // Container ref and size
+  const containerRef = useRef<HTMLDivElement>(null);
+  const pipRef = useRef<HTMLDivElement>(null);
+
+  // Corner snapping and custom drag position
+  const [corner, setCorner] = useState<Corner>('bottom-right');
+  const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Drag tracking refs
+  const dragStartRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    initialPosX: number;
+    initialPosY: number;
+    distanceMoved: number;
+  } | null>(null);
+
+  // Main and PIP video elements
+  const mainVideoRef = useRef<HTMLVideoElement>(null);
+  const pipVideoRef = useRef<HTMLVideoElement>(null);
+
+  // Determine which participant is where
+  const mainParticipant = isSwapped ? localParticipant : remoteParticipant;
+  const pipParticipant = isSwapped ? remoteParticipant : localParticipant;
+
+  const mainStream = isSwapped ? localStream : remoteStream;
+  const pipStream = isSwapped ? remoteStream : localStream;
+
+  const isMainLocal = isSwapped;
+  const isPipLocal = !isSwapped;
+
+  // Track video streams state
+  const mainVideoTracks = mainStream ? mainStream.getVideoTracks() : [];
+  const activeMainTrack = mainVideoTracks.find((t) => t.readyState === 'live');
+  const hasMainVideo = !mainParticipant.isVideoMuted && Boolean(activeMainTrack);
+
+  const pipVideoTracks = pipStream ? pipStream.getVideoTracks() : [];
+  const activePipTrack = pipVideoTracks.find((t) => t.readyState === 'live');
+  const hasPipVideo = !pipParticipant.isVideoMuted && Boolean(activePipTrack);
+
+  // Bind main video stream
+  useEffect(() => {
+    const videoEl = mainVideoRef.current;
+    if (videoEl && mainStream) {
+      if (videoEl.srcObject !== mainStream) {
+        videoEl.srcObject = mainStream;
+      }
+      videoEl.play().catch(() => {});
+    }
+  }, [mainStream, isSwapped]);
+
+  // Bind PIP video stream
+  useEffect(() => {
+    const videoEl = pipVideoRef.current;
+    if (videoEl && pipStream) {
+      if (videoEl.srcObject !== pipStream) {
+        videoEl.srcObject = pipStream;
+      }
+      videoEl.play().catch(() => {});
+    }
+  }, [pipStream, isSwapped]);
+
+  // Compute corner positions
+  const getCornerPosition = useCallback(
+    (targetCorner: Corner, containerW: number, containerH: number, pipW: number, pipH: number) => {
+      const padX = 16;
+      const padY = 16;
+      switch (targetCorner) {
+        case 'top-left':
+          return { x: padX, y: padY };
+        case 'top-right':
+          return { x: Math.max(padX, containerW - pipW - padX), y: padY };
+        case 'bottom-left':
+          return { x: padX, y: Math.max(padY, containerH - pipH - padY) };
+        case 'bottom-right':
+        default:
+          return {
+            x: Math.max(padX, containerW - pipW - padX),
+            y: Math.max(padY, containerH - pipH - padY),
+          };
+      }
+    },
+    []
+  );
+
+  // Recalculate position on container resize or corner change
+  const updatePipPosition = useCallback(() => {
+    if (isDragging) return;
+    const container = containerRef.current;
+    const pip = pipRef.current;
+    if (!container || !pip) return;
+
+    const cRect = container.getBoundingClientRect();
+    const pRect = pip.getBoundingClientRect();
+    const pipW = pRect.width || 120;
+    const pipH = pRect.height || 160;
+
+    const pos = getCornerPosition(corner, cRect.width, cRect.height, pipW, pipH);
+    setPosition(pos);
+  }, [corner, isDragging, getCornerPosition]);
+
+  useEffect(() => {
+    updatePipPosition();
+    const container = containerRef.current;
+    if (!container) return;
+
+    const observer = new ResizeObserver(() => {
+      updatePipPosition();
+    });
+    observer.observe(container);
+
+    return () => observer.disconnect();
+  }, [updatePipPosition]);
+
+  // Pointer drag events for PIP tile
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+
+    const rect = target.getBoundingClientRect();
+    const container = containerRef.current?.getBoundingClientRect();
+    if (!container) return;
+
+    const currentX = position ? position.x : rect.left - container.left;
+    const currentY = position ? position.y : rect.top - container.top;
+
+    dragStartRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      initialPosX: currentX,
+      initialPosY: currentY,
+      distanceMoved: 0,
+    };
+    setIsDragging(true);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragStartRef.current || dragStartRef.current.pointerId !== e.pointerId) return;
+
+    const dx = e.clientX - dragStartRef.current.startX;
+    const dy = e.clientY - dragStartRef.current.startY;
+    dragStartRef.current.distanceMoved = Math.sqrt(dx * dx + dy * dy);
+
+    const container = containerRef.current;
+    const pip = pipRef.current;
+    if (!container || !pip) return;
+
+    const cRect = container.getBoundingClientRect();
+    const pRect = pip.getBoundingClientRect();
+
+    const minX = 8;
+    const maxX = Math.max(8, cRect.width - pRect.width - 8);
+    const minY = 8;
+    const maxY = Math.max(8, cRect.height - pRect.height - 8);
+
+    const nextX = Math.min(maxX, Math.max(minX, dragStartRef.current.initialPosX + dx));
+    const nextY = Math.min(maxY, Math.max(minY, dragStartRef.current.initialPosY + dy));
+
+    setPosition({ x: nextX, y: nextY });
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragStartRef.current || dragStartRef.current.pointerId !== e.pointerId) return;
+
+    const target = e.currentTarget;
+    try {
+      target.releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+
+    const distance = dragStartRef.current.distanceMoved;
+    dragStartRef.current = null;
+    setIsDragging(false);
+
+    // If tap/click with minimal movement, SWAP the cameras!
+    if (distance <= 8) {
+      setIsSwapped((prev) => !prev);
+      return;
+    }
+
+    // Otherwise snap to the closest of the 4 corners
+    const container = containerRef.current;
+    const pip = pipRef.current;
+    if (!container || !pip) return;
+
+    const cRect = container.getBoundingClientRect();
+    const pRect = pip.getBoundingClientRect();
+    const currentX = position?.x ?? 0;
+    const currentY = position?.y ?? 0;
+
+    const corners: { corner: Corner; x: number; y: number }[] = [
+      { corner: 'top-left', ...getCornerPosition('top-left', cRect.width, cRect.height, pRect.width, pRect.height) },
+      { corner: 'top-right', ...getCornerPosition('top-right', cRect.width, cRect.height, pRect.width, pRect.height) },
+      { corner: 'bottom-left', ...getCornerPosition('bottom-left', cRect.width, cRect.height, pRect.width, pRect.height) },
+      { corner: 'bottom-right', ...getCornerPosition('bottom-right', cRect.width, cRect.height, pRect.width, pRect.height) },
+    ];
+
+    let closestCorner: Corner = 'bottom-right';
+    let minDistance = Infinity;
+
+    for (const c of corners) {
+      const d = Math.hypot(c.x - currentX, c.y - currentY);
+      if (d < minDistance) {
+        minDistance = d;
+        closestCorner = c.corner;
+      }
+    }
+
+    setCorner(closestCorner);
+    const snapPos = getCornerPosition(closestCorner, cRect.width, cRect.height, pRect.width, pRect.height);
+    setPosition(snapPos);
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      id="whatsapp-two-party-container"
+      className="relative w-full h-full flex-1 overflow-hidden bg-[#111b21] md:bg-[#202124] select-none"
+    >
+      {/* 1. MAIN FULLSCREEN VIDEO (Remote participant by default, or Local if swapped) */}
+      <div className="absolute inset-0 w-full h-full flex items-center justify-center overflow-hidden bg-[#111b21]">
+        <video
+          ref={mainVideoRef}
+          autoPlay
+          playsInline
+          muted={isMainLocal} // Mute local audio feedback
+          style={
+            isMainLocal && (currentQuality === '144p' || currentQuality === '240p')
+              ? { imageRendering: 'pixelated' }
+              : undefined
+          }
+          className={`w-full h-full object-cover transition-opacity duration-200 ${
+            hasMainVideo ? 'opacity-100' : 'opacity-0 absolute pointer-events-none'
+          } ${isMainLocal && !mainParticipant.isScreenSharing ? 'scale-x-[-1]' : ''}`}
+        />
+
+        {/* Inactive Video State for Main Participant */}
+        {!hasMainVideo && (
+          <div className="flex flex-col items-center justify-center gap-4 select-none animate-fadeIn">
+            <div
+              className="w-24 h-24 sm:w-32 sm:h-32 rounded-full flex items-center justify-center text-white text-3xl sm:text-4xl font-semibold shadow-2xl border-2 border-white/10"
+              style={{ backgroundColor: mainParticipant.avatarColor || '#3b82f6' }}
+            >
+              {(mainParticipant.displayName || 'P').charAt(0).toUpperCase()}
+            </div>
+            <div className="text-center">
+              <span className="text-base sm:text-lg font-medium text-white block">
+                {mainParticipant.displayName}
+              </span>
+              <span className="text-xs sm:text-sm text-[#9aa0a6] mt-0.5 block">
+                Câmera desligada
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Overlay Badges for Main Participant */}
+        <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-10 flex items-center gap-2 bg-black/50 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 shadow-md">
+          <span className="text-xs sm:text-sm font-medium text-white truncate max-w-[140px] sm:max-w-[200px]">
+            {mainParticipant.displayName} {isMainLocal && '(Você)'}
+          </span>
+          {mainParticipant.isAudioMuted && (
+            <MicOff className="w-3.5 h-3.5 text-[#ea4335]" />
+          )}
+        </div>
+      </div>
+
+      {/* 2. FLOATING PIP TILE (WhatsApp style draggable corner thumbnail with tap-to-swap) */}
+      <div
+        ref={pipRef}
+        id="whatsapp-pip-thumbnail"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        title="Arraste para mudar de canto ou toque para alternar"
+        style={{
+          transform: position ? `translate3d(${position.x}px, ${position.y}px, 0)` : undefined,
+          touchAction: 'none',
+        }}
+        className={`absolute top-0 left-0 z-30 w-28 sm:w-36 md:w-44 aspect-[3/4] sm:aspect-[9/16] md:aspect-[3/4] rounded-2xl overflow-hidden shadow-2xl border-2 border-white/25 bg-[#202124] cursor-grab active:cursor-grabbing transition-all select-none ${
+          isDragging ? 'scale-105 shadow-2xl border-white/50 opacity-95 duration-0' : 'duration-300'
+        }`}
+      >
+        {/* PIP Video Stream */}
+        <video
+          ref={pipVideoRef}
+          autoPlay
+          playsInline
+          muted={isPipLocal}
+          className={`w-full h-full object-cover pointer-events-none transition-opacity duration-200 ${
+            hasPipVideo ? 'opacity-100' : 'opacity-0 absolute'
+          } ${isPipLocal && !pipParticipant.isScreenSharing ? 'scale-x-[-1]' : ''}`}
+        />
+
+        {/* PIP Inactive Video Fallback */}
+        {!hasPipVideo && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-2 bg-[#28292c]">
+            <div
+              className="w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center text-white text-base sm:text-lg font-semibold shadow-md"
+              style={{ backgroundColor: pipParticipant.avatarColor || '#3b82f6' }}
+            >
+              {(pipParticipant.displayName || 'P').charAt(0).toUpperCase()}
+            </div>
+            <span className="text-[11px] text-[#9aa0a6] mt-1.5 font-medium truncate max-w-full px-1">
+              Câmera off
+            </span>
+          </div>
+        )}
+
+        {/* PIP Tap to Swap Indicator Icon */}
+        <div className="absolute top-1.5 right-1.5 bg-black/60 backdrop-blur-sm p-1 rounded-full text-white/90 shadow pointer-events-none">
+          <ArrowLeftRight className="w-3 h-3" />
+        </div>
+
+        {/* PIP Bottom Name Tag */}
+        <div className="absolute bottom-1.5 inset-x-1.5 flex items-center justify-between bg-black/60 backdrop-blur-sm px-2 py-1 rounded-md text-[10px] sm:text-xs text-white pointer-events-none border border-white/10">
+          <span className="truncate font-medium">
+            {isPipLocal ? 'Você' : pipParticipant.displayName}
+          </span>
+          {pipParticipant.isAudioMuted && (
+            <MicOff className="w-2.5 h-2.5 text-[#ea4335] shrink-0 ml-1" />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
