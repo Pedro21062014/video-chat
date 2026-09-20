@@ -230,14 +230,14 @@ export default function MeetingApp() {
       if (localStreamRef.current) {
         if (webrtcManagerRef.current) {
           webrtcManagerRef.current.setLocalStream(localStreamRef.current);
-          await webrtcManagerRef.current.applyVideoQuality(targetOpt);
+          webrtcManagerRef.current.setPreferredQuality(newQuality);
         }
         setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
       }
     } catch (err) {
       console.error('[VideoQuality] Error applying quality constraints:', err);
       if (webrtcManagerRef.current) {
-        await webrtcManagerRef.current.applyVideoQuality(targetOpt);
+        webrtcManagerRef.current.setPreferredQuality(newQuality);
       }
     }
   };
@@ -329,6 +329,10 @@ export default function MeetingApp() {
           next.delete(peerId);
           return next;
         });
+      },
+      (adaptiveQualityId, reason) => {
+        setVideoQuality(adaptiveQualityId);
+        setNotificationMessage(reason);
       }
     );
 

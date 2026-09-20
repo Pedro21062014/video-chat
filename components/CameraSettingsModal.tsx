@@ -265,10 +265,10 @@ export const CameraSettingsModal: React.FC<CameraSettingsModalProps> = ({
             </div>
           </div>
 
-          <div className="p-2.5 rounded-lg bg-[#282a2e]/40 border border-[#33373b]/50 text-[11px] text-[#80868b] flex items-center gap-2">
+          <div className="p-2.5 rounded-lg bg-[#8ab4f8]/10 border border-[#8ab4f8]/20 text-[11px] text-[#8ab4f8] flex items-center gap-2">
             <Activity className="w-3.5 h-3.5 text-[#8ab4f8] shrink-0" />
             <span>
-              Resoluções menores como 144p e 240p reduzem o consumo de dados e internet em conexões lentas.
+              <strong>Modo Adaptativo Ativo:</strong> Se a internet oscilar ou ficar lenta, a qualidade diminui automaticamente para manter a chamada rápida e sem travamentos.
             </span>
           </div>
         </div>

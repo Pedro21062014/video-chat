@@ -9,7 +9,7 @@ import {
   Unsubscribe,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { VideoQualityOption, SignalMessage } from './types';
+import { VideoQualityOption, VideoQualityId, VIDEO_QUALITIES, SignalMessage } from './types';
 
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -40,6 +40,7 @@ export class PeerConnectionManager {
   private localUserId: string;
   private localStream: MediaStream | null = null;
   private screenStream: MediaStream | null = null;
+  private targetQualityId: VideoQualityId = '720p';
   private currentQualityOption: VideoQualityOption | null = null;
   private peerConnections: Map<string, RTCPeerConnection> = new Map();
   private remoteStreams: Map<string, MediaStream> = new Map();
@@ -48,21 +49,33 @@ export class PeerConnectionManager {
   private connectionAttempts: Map<string, number> = new Map();
   private isNegotiating: Map<string, boolean> = new Map();
   private supervisorInterval: NodeJS.Timeout | null = null;
+  private statsInterval: NodeJS.Timeout | null = null;
   private unsubscribeSignals: Unsubscribe | null = null;
   private onRemoteStreamCallback?: (userId: string, stream: MediaStream) => void;
   private onPeerDisconnectCallback?: (userId: string) => void;
+  private onAdaptiveQualityCallback?: (qualityId: VideoQualityId, reason: string) => void;
   private isListening: boolean = false;
+
+  // Adaptive Quality Tracking
+  private badNetworkCycles: number = 0;
+  private goodNetworkCycles: number = 0;
+  private isAdaptiveActive: boolean = true;
 
   constructor(
     roomId: string,
     localUserId: string,
     onRemoteStream?: (userId: string, stream: MediaStream) => void,
-    onPeerDisconnect?: (userId: string) => void
+    onPeerDisconnect?: (userId: string) => void,
+    onAdaptiveQualityChange?: (qualityId: VideoQualityId, reason: string) => void
   ) {
     this.roomId = roomId;
     this.localUserId = localUserId;
     this.onRemoteStreamCallback = onRemoteStream;
     this.onPeerDisconnectCallback = onPeerDisconnect;
+    this.onAdaptiveQualityCallback = onAdaptiveQualityChange;
+
+    const defaultOpt = VIDEO_QUALITIES.find((q) => q.id === '720p') || VIDEO_QUALITIES[2];
+    this.currentQualityOption = defaultOpt;
   }
 
   startListening(initialStream?: MediaStream | null) {
@@ -111,7 +124,11 @@ export class PeerConnectionManager {
 
       // 2. Start supervisor loop to auto-heal disconnected peers
       this.startSupervisor();
-      console.info(`[WebRTC] Signaling started for room ${this.roomId} as user ${this.localUserId}`);
+
+      // 3. Start Adaptive Quality Monitor for speed optimization & automatic downgrade
+      this.startAdaptiveStatsMonitor();
+
+      console.info(`[WebRTC] Signaling and speed optimization active for room ${this.roomId}`);
     } catch (err) {
       console.error('[WebRTC] Failed to start signaling:', err);
     }
@@ -122,6 +139,127 @@ export class PeerConnectionManager {
     this.supervisorInterval = setInterval(() => {
       this.reconcileConnections();
     }, 2500);
+  }
+
+  /**
+   * Adaptive Bitrate & Quality Monitor:
+   * Inspects connection RTT, packet loss, bandwidth limitation, and dropped frames.
+   * If network is lagging, automatically decreases video quality to maintain ultra-fast, smooth streaming.
+   */
+  private startAdaptiveStatsMonitor() {
+    if (this.statsInterval) clearInterval(this.statsInterval);
+    this.statsInterval = setInterval(async () => {
+      if (!this.isListening || this.peerConnections.size === 0 || !this.isAdaptiveActive) return;
+
+      let maxRtt = 0;
+      let maxPacketLossRate = 0;
+      let isBandwidthLimited = false;
+      let hasActiveConnection = false;
+
+      for (const [, pc] of this.peerConnections) {
+        if (pc.connectionState !== 'connected') continue;
+        hasActiveConnection = true;
+
+        try {
+          const stats = await pc.getStats();
+          stats.forEach((report) => {
+            // Outbound video stats
+            if (report.type === 'outbound-rtp' && report.kind === 'video') {
+              if (report.qualityLimitationReason === 'bandwidth' || report.qualityLimitationReason === 'cpu') {
+                isBandwidthLimited = true;
+              }
+            }
+
+            // Candidate pair RTT
+            if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+              if (report.currentRoundTripTime !== undefined) {
+                const rttMs = report.currentRoundTripTime * 1000;
+                if (rttMs > maxRtt) maxRtt = rttMs;
+              }
+            }
+
+            // Remote inbound packet loss
+            if (report.type === 'remote-inbound-rtp' && report.kind === 'video') {
+              if (report.fractionLost !== undefined && report.fractionLost > 0) {
+                const lossPct = report.fractionLost * 100;
+                if (lossPct > maxPacketLossRate) maxPacketLossRate = lossPct;
+              }
+              if (report.roundTripTime !== undefined) {
+                const rttMs = report.roundTripTime * 1000;
+                if (rttMs > maxRtt) maxRtt = rttMs;
+              }
+            }
+          });
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!hasActiveConnection) return;
+
+      const isLagging = maxRtt > 320 || maxPacketLossRate > 4 || isBandwidthLimited;
+
+      if (isLagging) {
+        this.badNetworkCycles += 1;
+        this.goodNetworkCycles = 0;
+
+        // If lagging for 2 consecutive cycles (4s), automatically step down quality
+        if (this.badNetworkCycles >= 2) {
+          this.badNetworkCycles = 0;
+          this.stepDownQuality(maxRtt, maxPacketLossRate);
+        }
+      } else if (maxRtt < 130 && maxPacketLossRate < 1) {
+        this.goodNetworkCycles += 1;
+        this.badNetworkCycles = 0;
+
+        // If stable for 5 consecutive cycles (10s), try to gently step up toward preferred quality
+        if (this.goodNetworkCycles >= 5) {
+          this.goodNetworkCycles = 0;
+          this.stepUpQuality();
+        }
+      } else {
+        this.badNetworkCycles = 0;
+        this.goodNetworkCycles = 0;
+      }
+    }, 2000);
+  }
+
+  private stepDownQuality(rtt: number, loss: number) {
+    if (!this.currentQualityOption) return;
+    const ladder: VideoQualityId[] = ['4k', '1080p', '720p', '480p', '360p', '240p', '144p'];
+    const currentIndex = ladder.indexOf(this.currentQualityOption.id);
+
+    if (currentIndex < ladder.length - 1) {
+      const nextId = ladder[currentIndex + 1];
+      const nextOpt = VIDEO_QUALITIES.find((q) => q.id === nextId);
+      if (nextOpt) {
+        console.info(`[WebRTC Adaptive] Network slow (RTT: ${Math.round(rtt)}ms, Loss: ${loss.toFixed(1)}%). Auto-downgrading to ${nextId}`);
+        this.applyVideoQuality(nextOpt).catch(() => {});
+        if (this.onAdaptiveQualityCallback) {
+          this.onAdaptiveQualityCallback(nextId, 'Velocidade otimizada: qualidade diminuída automaticamente para evitar travamentos.');
+        }
+      }
+    }
+  }
+
+  private stepUpQuality() {
+    if (!this.currentQualityOption) return;
+    const ladder: VideoQualityId[] = ['4k', '1080p', '720p', '480p', '360p', '240p', '144p'];
+    const currentIndex = ladder.indexOf(this.currentQualityOption.id);
+    const targetIndex = ladder.indexOf(this.targetQualityId);
+
+    // Only step up if currently lower than the user's preferred target quality
+    if (currentIndex > targetIndex && currentIndex > 0) {
+      const prevId = ladder[currentIndex - 1];
+      const prevOpt = VIDEO_QUALITIES.find((q) => q.id === prevId);
+      if (prevOpt) {
+        console.info(`[WebRTC Adaptive] Network recovered. Auto-recovering quality to ${prevId}`);
+        this.applyVideoQuality(prevOpt).catch(() => {});
+        if (this.onAdaptiveQualityCallback) {
+          this.onAdaptiveQualityCallback(prevId, 'Conexão estável: restaurando resolução com fluidez.');
+        }
+      }
+    }
   }
 
   private reconcileConnections() {
@@ -214,7 +352,7 @@ export class PeerConnectionManager {
       }
     };
 
-    // 2. Track / Stream Reception Handler
+    // 2. Track / Stream Reception Handler with instant reactivity
     pc.ontrack = (event) => {
       console.info(`[WebRTC] Received ${event.track.kind} track from peer ${targetUserId}`);
       let remoteStream = this.remoteStreams.get(targetUserId);
@@ -261,13 +399,17 @@ export class PeerConnectionManager {
       if (pc.connectionState === 'connected') {
         this.connectionAttempts.delete(targetUserId);
         this.isNegotiating.set(targetUserId, false);
+
+        // Apply quality settings immediately upon connection
+        if (this.currentQualityOption) {
+          this.applyQualityToPeer(pc, this.currentQualityOption).catch(() => {});
+        }
       } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
         this.isNegotiating.set(targetUserId, false);
       }
     };
 
     pc.oniceconnectionstatechange = () => {
-      console.info(`[WebRTC] ICE state with ${targetUserId}: ${pc.iceConnectionState}`);
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
         this.connectionAttempts.delete(targetUserId);
       }
@@ -285,7 +427,10 @@ export class PeerConnectionManager {
         const existingSender = senders.find((s) => s.track?.kind === track.kind);
         if (!existingSender) {
           try {
-            pc.addTrack(track, activeStream);
+            const sender = pc.addTrack(track, activeStream);
+            if (track.kind === 'video' && this.currentQualityOption) {
+              this.tuneSenderParameters(sender, this.currentQualityOption);
+            }
           } catch {
             // ignore
           }
@@ -442,6 +587,9 @@ export class PeerConnectionManager {
         for (const sender of senders) {
           if (sender.track?.kind === 'video' && videoTrack && !this.screenStream) {
             await sender.replaceTrack(videoTrack);
+            if (this.currentQualityOption) {
+              this.tuneSenderParameters(sender, this.currentQualityOption);
+            }
             replacedVideo = true;
           } else if (sender.track?.kind === 'audio' && audioTrack) {
             await sender.replaceTrack(audioTrack);
@@ -452,7 +600,10 @@ export class PeerConnectionManager {
         // If no existing sender was present, add track
         if (!replacedVideo && videoTrack && !this.screenStream) {
           try {
-            pc.addTrack(videoTrack, stream);
+            const sender = pc.addTrack(videoTrack, stream);
+            if (this.currentQualityOption) {
+              this.tuneSenderParameters(sender, this.currentQualityOption);
+            }
           } catch {
             // ignore
           }
@@ -491,28 +642,47 @@ export class PeerConnectionManager {
     }
   }
 
+  /**
+   * Sets preferred base quality selected by user and resets adaptive state.
+   */
+  setPreferredQuality(qualityId: VideoQualityId) {
+    this.targetQualityId = qualityId;
+    const opt = VIDEO_QUALITIES.find((q) => q.id === qualityId) || VIDEO_QUALITIES[2];
+    this.applyVideoQuality(opt).catch(() => {});
+  }
+
+  private tuneSenderParameters(sender: RTCRtpSender, opt: VideoQualityOption) {
+    try {
+      const params = sender.getParameters();
+      if (!params.encodings || params.encodings.length === 0) {
+        params.encodings = [{}];
+      }
+      params.encodings[0].maxBitrate = opt.bitrate;
+      params.encodings[0].maxFramerate = opt.frameRate;
+      if (opt.scaleResolutionDownBy > 1) {
+        params.encodings[0].scaleResolutionDownBy = opt.scaleResolutionDownBy;
+      } else {
+        delete params.encodings[0].scaleResolutionDownBy;
+      }
+      // Speed & smoothness priority: maintain framerate and low latency
+      params.degradationPreference = 'maintain-framerate';
+      sender.setParameters(params).catch(() => {});
+    } catch {
+      // ignore
+    }
+  }
+
+  private async applyQualityToPeer(pc: RTCPeerConnection, opt: VideoQualityOption) {
+    const videoSender = pc.getSenders().find((s) => s.track?.kind === 'video');
+    if (!videoSender) return;
+    this.tuneSenderParameters(videoSender, opt);
+  }
+
   async applyVideoQuality(opt: VideoQualityOption) {
     this.currentQualityOption = opt;
     for (const [, pc] of this.peerConnections) {
       if (pc.connectionState === 'closed') continue;
-      const videoSender = pc.getSenders().find((s) => s.track?.kind === 'video');
-      if (!videoSender) continue;
-      try {
-        const params = videoSender.getParameters();
-        if (!params.encodings || params.encodings.length === 0) {
-          params.encodings = [{}];
-        }
-        params.encodings[0].maxBitrate = opt.bitrate;
-        params.encodings[0].maxFramerate = opt.frameRate;
-        if (opt.scaleResolutionDownBy > 1) {
-          params.encodings[0].scaleResolutionDownBy = opt.scaleResolutionDownBy;
-        } else {
-          delete params.encodings[0].scaleResolutionDownBy;
-        }
-        await videoSender.setParameters(params);
-      } catch (err) {
-        console.warn('[WebRTC] Could not set video encoding parameters:', err);
-      }
+      await this.applyQualityToPeer(pc, opt);
     }
   }
 
@@ -522,6 +692,11 @@ export class PeerConnectionManager {
     if (this.supervisorInterval) {
       clearInterval(this.supervisorInterval);
       this.supervisorInterval = null;
+    }
+
+    if (this.statsInterval) {
+      clearInterval(this.statsInterval);
+      this.statsInterval = null;
     }
 
     if (this.unsubscribeSignals) {
