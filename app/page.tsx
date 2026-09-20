@@ -95,6 +95,10 @@ export default function MeetingApp() {
 
   // UI Panels
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const isChatOpenRef = useRef(isChatOpen);
+  useEffect(() => {
+    isChatOpenRef.current = isChatOpen;
+  }, [isChatOpen]);
   const [isParticipantsOpen, setIsParticipantsOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState<string>('');
   const [copiedLinkBanner, setCopiedLinkBanner] = useState(false);
@@ -724,7 +728,7 @@ export default function MeetingApp() {
           const data = change.doc.data();
           if (data.senderId !== currentUserId) {
             sound.playMessage();
-            if (!isChatOpen) {
+            if (!isChatOpenRef.current) {
               setUnreadChatCount((prev) => prev + 1);
             }
           }
@@ -756,7 +760,7 @@ export default function MeetingApp() {
       unsubscribeMessages();
       unsubscribeReactions();
     };
-  }, [isInRoom, roomId, currentUserId, isChatOpen]);
+  }, [isInRoom, roomId, currentUserId]);
 
   // Realtime Web Audio Speaking Activity Detector
   useEffect(() => {
