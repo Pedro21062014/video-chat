@@ -360,14 +360,16 @@ export const WhatsAppTwoPartyView: React.FC<WhatsAppTwoPartyViewProps> = ({
               }
             });
           }}
-          style={
-            isMainLocal && (currentQuality === '144p' || currentQuality === '240p')
+          style={{
+            transform: isMainLocal && !mainParticipant.isScreenSharing ? 'scaleX(-1) translateZ(0)' : 'translateZ(0)',
+            willChange: 'transform',
+            ...(isMainLocal && (currentQuality === '144p' || currentQuality === '240p')
               ? { imageRendering: 'pixelated' }
-              : undefined
-          }
+              : {}),
+          }}
           className={`w-full h-full object-cover transition-opacity duration-200 ${
             hasMainVideo ? 'opacity-100' : 'opacity-0 absolute pointer-events-none'
-          } ${isMainLocal && !mainParticipant.isScreenSharing ? 'scale-x-[-1]' : ''}`}
+          }`}
         />
 
         {/* Inactive Video State for Main Participant */}
@@ -435,9 +437,13 @@ export const WhatsAppTwoPartyView: React.FC<WhatsAppTwoPartyViewProps> = ({
               }
             });
           }}
+          style={{
+            transform: isPipLocal && !pipParticipant.isScreenSharing ? 'scaleX(-1) translateZ(0)' : 'translateZ(0)',
+            willChange: 'transform',
+          }}
           className={`w-full h-full object-cover pointer-events-none transition-opacity duration-200 ${
             hasPipVideo ? 'opacity-100' : 'opacity-0 absolute'
-          } ${isPipLocal && !pipParticipant.isScreenSharing ? 'scale-x-[-1]' : ''}`}
+          }`}
         />
 
         {/* PIP Inactive Video Fallback */}

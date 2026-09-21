@@ -53,6 +53,16 @@ export interface RoomData {
 
 export type VideoQualityId = '4k' | '1080p' | '720p' | '480p' | '360p' | '240p' | '144p';
 
+export type NetworkQualityStatus = 'good' | 'fair' | 'poor';
+
+export interface NetworkStatsInfo {
+  status: NetworkQualityStatus;
+  rtt: number;
+  packetLoss: number;
+  message?: string;
+  advice?: string;
+}
+
 export interface VideoQualityOption {
   id: VideoQualityId;
   label: string;

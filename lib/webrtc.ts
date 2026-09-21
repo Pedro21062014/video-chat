@@ -9,7 +9,7 @@ import {
   Unsubscribe,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { VideoQualityOption, VideoQualityId, VIDEO_QUALITIES, SignalMessage } from './types';
+import { VideoQualityOption, VideoQualityId, VIDEO_QUALITIES, SignalMessage, NetworkStatsInfo, NetworkQualityStatus } from './types';
 
 // High-reliability global STUN servers for robust NAT traversal
 const ICE_SERVERS: RTCIceServer[] = [
@@ -87,28 +87,38 @@ export class PeerConnectionManager {
   private onRemoteStreamCallback?: (userId: string, stream: MediaStream) => void;
   private onPeerDisconnectCallback?: (userId: string) => void;
   private onAdaptiveQualityCallback?: (qualityId: VideoQualityId, reason: string) => void;
+  private onNetworkStatusCallback?: (info: NetworkStatsInfo) => void;
   private isListening: boolean = false;
 
-  // Adaptive Quality Tracking
+  // Adaptive Quality & Network Health Tracking
   private badNetworkCycles: number = 0;
   private goodNetworkCycles: number = 0;
   private isAdaptiveActive: boolean = true;
+  private consecutivePoorCount: number = 0;
+  private consecutiveGoodCount: number = 0;
+  private lastReportedStatus: NetworkQualityStatus = 'good';
 
   constructor(
     roomId: string,
     localUserId: string,
     onRemoteStream?: (userId: string, stream: MediaStream) => void,
     onPeerDisconnect?: (userId: string) => void,
-    onAdaptiveQualityChange?: (qualityId: VideoQualityId, reason: string) => void
+    onAdaptiveQualityChange?: (qualityId: VideoQualityId, reason: string) => void,
+    onNetworkStatusChange?: (info: NetworkStatsInfo) => void
   ) {
     this.roomId = roomId;
     this.localUserId = localUserId;
     this.onRemoteStreamCallback = onRemoteStream;
     this.onPeerDisconnectCallback = onPeerDisconnect;
     this.onAdaptiveQualityCallback = onAdaptiveQualityChange;
+    this.onNetworkStatusCallback = onNetworkStatusChange;
 
     const defaultOpt = VIDEO_QUALITIES.find((q) => q.id === '720p') || VIDEO_QUALITIES[2];
     this.currentQualityOption = defaultOpt;
+  }
+
+  setOnNetworkStatusChange(callback: (info: NetworkStatsInfo) => void) {
+    this.onNetworkStatusCallback = callback;
   }
 
   startListening(initialStream?: MediaStream | null) {
@@ -221,6 +231,79 @@ export class PeerConnectionManager {
       }
 
       if (!hasActiveConnection) return;
+
+      // Real-time network health evaluation for user alerts
+      const navConn = typeof navigator !== 'undefined' && 'connection' in navigator ? (navigator as any).connection : null;
+      const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+
+      let detectedStatus: NetworkQualityStatus = 'good';
+      let statusMsg = 'Conexão estável e rápida';
+      let statusAdvice = '';
+
+      if (isOffline) {
+        detectedStatus = 'poor';
+        statusMsg = 'Sem conexão com a internet';
+        statusAdvice = 'Você está offline. Verifique seu sinal de Wi-Fi ou dados móveis.';
+      } else if (
+        (maxPacketLossRate >= 5.5 && maxRtt > 320) ||
+        maxPacketLossRate >= 8.5 ||
+        maxRtt > 650 ||
+        (navConn && (navConn.effectiveType === '2g' || navConn.effectiveType === 'slow-2g'))
+      ) {
+        detectedStatus = 'poor';
+        statusMsg = 'Sua conexão de internet está instável';
+        statusAdvice = 'Sua conexão de internet está instável. Para evitar travamentos e melhorar a chamada, procure um lugar com melhor sinal de Wi-Fi ou dados móveis.';
+      } else if (
+        maxPacketLossRate >= 2.5 ||
+        maxRtt > 260 ||
+        (navConn && navConn.effectiveType === '3g')
+      ) {
+        detectedStatus = 'fair';
+        statusMsg = 'Sinal de internet oscilando';
+        statusAdvice = 'Sua conexão está um pouco lenta. A taxa de vídeo foi adaptada para manter a chamada sem travamentos.';
+      }
+
+      if (detectedStatus === 'poor') {
+        this.consecutivePoorCount++;
+        this.consecutiveGoodCount = 0;
+        if (this.consecutivePoorCount >= 2 && this.lastReportedStatus !== 'poor') {
+          this.lastReportedStatus = 'poor';
+          this.onNetworkStatusCallback?.({
+            status: 'poor',
+            rtt: Math.round(maxRtt),
+            packetLoss: Math.round(maxPacketLossRate),
+            message: statusMsg,
+            advice: statusAdvice,
+          });
+        }
+      } else if (detectedStatus === 'fair') {
+        this.consecutiveGoodCount = 0;
+        if (this.lastReportedStatus !== 'fair' && this.consecutivePoorCount === 0) {
+          this.lastReportedStatus = 'fair';
+          this.onNetworkStatusCallback?.({
+            status: 'fair',
+            rtt: Math.round(maxRtt),
+            packetLoss: Math.round(maxPacketLossRate),
+            message: statusMsg,
+            advice: statusAdvice,
+          });
+        }
+      } else {
+        this.consecutiveGoodCount++;
+        if (this.consecutiveGoodCount >= 2) {
+          this.consecutivePoorCount = 0;
+          if (this.lastReportedStatus !== 'good') {
+            this.lastReportedStatus = 'good';
+            this.onNetworkStatusCallback?.({
+              status: 'good',
+              rtt: Math.round(maxRtt),
+              packetLoss: Math.round(maxPacketLossRate),
+              message: 'Conexão de internet restabelecida',
+              advice: '',
+            });
+          }
+        }
+      }
 
       // Only consider congested if sustained high loss (>12%) with high RTT (>500ms) or severe loss (>18%)
       const isCongested = (maxPacketLossRate >= 12 && maxRtt > 500) || maxPacketLossRate >= 18 || maxRtt > 850;
@@ -507,6 +590,13 @@ export class PeerConnectionManager {
 
     if (activeStream && activeStream.getTracks().length > 0) {
       activeStream.getTracks().forEach((track) => {
+        // Hardware acceleration hint: motion for video, speech for audio
+        if (track.kind === 'video') {
+          (track as any).contentHint = this.screenStream ? 'detail' : 'motion';
+        } else if (track.kind === 'audio') {
+          (track as any).contentHint = 'speech';
+        }
+
         const existingSender = senders.find((s) => s.track?.kind === track.kind);
         if (!existingSender) {
           try {
@@ -708,6 +798,13 @@ export class PeerConnectionManager {
     const videoTrack = stream.getVideoTracks()[0] || null;
     const audioTrack = stream.getAudioTracks()[0] || null;
 
+    if (videoTrack) {
+      (videoTrack as any).contentHint = 'motion';
+    }
+    if (audioTrack) {
+      (audioTrack as any).contentHint = 'speech';
+    }
+
     for (const [targetUserId, pc] of this.peerConnections) {
       if (pc.connectionState === 'closed') continue;
 
@@ -764,6 +861,7 @@ export class PeerConnectionManager {
 
     const videoTrack = activeStream.getVideoTracks()[0] || null;
     if (videoTrack) {
+      (videoTrack as any).contentHint = screenStream ? 'detail' : 'motion';
       for (const [, pc] of this.peerConnections) {
         if (pc.connectionState === 'closed') continue;
         const videoSender = pc.getSenders().find((s) => s.track?.kind === 'video');

@@ -12,11 +12,13 @@ import {
   Shield,
   Volume2,
   AlertCircle,
+  WifiOff,
 } from 'lucide-react';
 import { sound } from '@/lib/sound';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { checkCallLimit } from '@/lib/callsLimit';
+import { NetworkStatsInfo } from '@/lib/types';
 
 const DEFAULT_PARTICIPANT_NAME = 'Participante';
 
@@ -32,9 +34,15 @@ interface LobbyProps {
     existingStream?: MediaStream | null
   ) => void;
   notificationMessage?: string | null;
+  networkInfo?: NetworkStatsInfo | null;
 }
 
-export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notificationMessage }) => {
+export const Lobby: React.FC<LobbyProps> = ({
+  initialRoomId,
+  onJoinRoom,
+  notificationMessage,
+  networkInfo,
+}) => {
   const [displayName, setDisplayName] = useState('');
   const [targetRoomId, setTargetRoomId] = useState(initialRoomId || '');
   const [isAudioMuted, setIsAudioMuted] = useState(false);
@@ -399,6 +407,22 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom, notific
             <div className="bg-[#ea4335]/15 border border-[#ea4335]/40 text-[#f28b82] px-4 py-2.5 rounded-lg text-sm flex items-center gap-2 max-w-md animate-fadeIn">
               <Shield className="w-4 h-4 text-[#ea4335] shrink-0" />
               <span>{notificationMessage}</span>
+            </div>
+          )}
+
+          {/* Poor network warning before joining */}
+          {networkInfo?.status === 'poor' && (
+            <div
+              id="alert-lobby-poor-connection"
+              className="bg-[#2d1a08]/90 border border-[#f59e0b]/50 text-[#fef3c7] p-3 rounded-xl text-xs flex items-start gap-2.5 max-w-md animate-fadeIn shadow-lg"
+            >
+              <WifiOff className="w-4 h-4 text-[#fbbf24] shrink-0 mt-0.5" />
+              <div>
+                <strong className="text-white block font-medium">Sua internet está instável</strong>
+                <span className="text-[#fed7aa] text-[11px] leading-relaxed block mt-0.5">
+                  Para evitar travamentos durante a chamada, procure um lugar com melhor sinal de Wi-Fi ou dados móveis antes de entrar.
+                </span>
+              </div>
             </div>
           )}
 

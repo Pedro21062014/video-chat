@@ -202,14 +202,16 @@ export const VideoTile: React.FC<VideoTileProps> = ({
             }
           });
         }}
-        style={
-          isLocal && (currentQuality === '144p' || currentQuality === '240p')
+        style={{
+          transform: isLocal && !participant.isScreenSharing ? 'scaleX(-1) translateZ(0)' : 'translateZ(0)',
+          willChange: 'transform',
+          ...(isLocal && (currentQuality === '144p' || currentQuality === '240p')
             ? { imageRendering: 'pixelated' }
-            : undefined
-        }
+            : {}),
+        }}
         className={`w-full h-full object-cover transition-opacity duration-200 ${
           hasVideo ? 'opacity-100' : 'opacity-0 absolute pointer-events-none'
-        } ${isLocal && !participant.isScreenSharing ? 'scale-x-[-1]' : ''}`}
+        }`}
       />
 
       {/* Meet Style Inactive Video State */}

@@ -20,6 +20,7 @@ import {
   RoomData,
   VIDEO_QUALITIES,
   VideoQualityId,
+  NetworkStatsInfo,
 } from '@/lib/types';
 import { PeerConnectionManager } from '@/lib/webrtc';
 import { sound } from '@/lib/sound';
@@ -33,6 +34,8 @@ import { Lobby } from '@/components/Lobby';
 import { MiniCallWindow } from '@/components/MiniCallWindow';
 import { CameraSettingsModal } from '@/components/CameraSettingsModal';
 import { WhatsAppTwoPartyView } from '@/components/WhatsAppTwoPartyView';
+import { NetworkAlertBanner } from '@/components/NetworkAlertBanner';
+import { NetworkQualityPill } from '@/components/NetworkQualityPill';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { AudioActivityDetector } from '@/lib/audioDetector';
@@ -111,7 +114,47 @@ export default function MeetingApp() {
   const audioDetectorRef = useRef<AudioActivityDetector | null>(null);
   const isMobile = useIsMobile();
 
+  // Network quality telemetry and poor internet alert
+  const [networkInfo, setNetworkInfo] = useState<NetworkStatsInfo | null>(null);
+  const [isNetworkAlertDismissed, setIsNetworkAlertDismissed] = useState(false);
+
   const webrtcManagerRef = useRef<PeerConnectionManager | null>(null);
+
+  // Network online/offline change listener
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleOffline = () => {
+      setNetworkInfo({
+        status: 'poor',
+        rtt: 0,
+        packetLoss: 100,
+        message: 'Você está sem conexão com a internet',
+        advice: 'Sua internet caiu. Procure um lugar com melhor sinal de Wi-Fi ou dados móveis para restabelecer a chamada.',
+      });
+      setIsNetworkAlertDismissed(false);
+    };
+
+    const handleOnline = () => {
+      setNetworkInfo((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: 'good',
+              message: 'Conexão restabelecida',
+              advice: '',
+            }
+          : null
+      );
+    };
+
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
+    return () => {
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, []);
 
   // Safe Client Initialization: Detect URL parameter and clean up previous local session if reloaded
   useEffect(() => {
@@ -333,6 +376,12 @@ export default function MeetingApp() {
       (adaptiveQualityId, reason) => {
         setVideoQuality(adaptiveQualityId);
         setNotificationMessage(reason);
+      },
+      (networkStats) => {
+        setNetworkInfo(networkStats);
+        if (networkStats.status === 'poor') {
+          setIsNetworkAlertDismissed(false);
+        }
       }
     );
 
@@ -1091,6 +1140,7 @@ export default function MeetingApp() {
           initialRoomId={roomId}
           onJoinRoom={handleJoinRoom}
           notificationMessage={notificationMessage}
+          networkInfo={networkInfo}
         />
       </ErrorBoundary>
     );
@@ -1229,9 +1279,22 @@ export default function MeetingApp() {
             </button>
           )}
 
+          {/* Real-time Network Quality Indicator Pill */}
+          <NetworkQualityPill
+            networkInfo={networkInfo}
+            onClick={() => setIsNetworkAlertDismissed(false)}
+          />
+
           <span className="font-medium text-[#e8eaed]">{currentTime}</span>
         </div>
       </header>
+
+      {/* Poor Network Warning Alert Banner */}
+      <NetworkAlertBanner
+        networkInfo={networkInfo}
+        onDismiss={() => setIsNetworkAlertDismissed(true)}
+        isDismissed={isNetworkAlertDismissed}
+      />
 
       {/* Main Video Area */}
       {shouldRenderWhatsAppView ? (
