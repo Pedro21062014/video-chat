@@ -23,6 +23,7 @@ interface VideoTileProps {
   onOpenSettings?: () => void;
   onToggleVideo?: () => void;
   currentQuality?: VideoQualityId;
+  className?: string;
 }
 
 export const VideoTile: React.FC<VideoTileProps> = ({
@@ -33,6 +34,7 @@ export const VideoTile: React.FC<VideoTileProps> = ({
   onOpenSettings,
   onToggleVideo,
   currentQuality,
+  className = '',
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [, setTrackState] = useState(0);
@@ -183,9 +185,9 @@ export const VideoTile: React.FC<VideoTileProps> = ({
       onContextMenu={handleContextMenu}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
-      className={`relative w-full h-full rounded-lg overflow-hidden bg-[#3c4043] transition-all duration-200 flex items-center justify-center group select-none shadow-md ${
+      className={`relative w-full h-full rounded-lg sm:rounded-xl overflow-hidden bg-[#3c4043] transition-all duration-200 flex items-center justify-center group select-none shadow-md ${
         isSpeaking ? 'active-speaker' : 'border border-[#3c4043]/60'
-      } ${isLocal ? 'cursor-context-menu' : ''}`}
+      } ${isLocal ? 'cursor-context-menu' : ''} ${className}`}
     >
       {/* Video Element */}
       <video
@@ -209,7 +211,9 @@ export const VideoTile: React.FC<VideoTileProps> = ({
             ? { imageRendering: 'pixelated' }
             : {}),
         }}
-        className={`w-full h-full object-cover transition-opacity duration-200 ${
+        className={`w-full h-full ${
+          participant.isScreenSharing ? 'object-contain bg-black' : 'object-cover'
+        } transition-opacity duration-200 ${
           hasVideo ? 'opacity-100' : 'opacity-0 absolute pointer-events-none'
         }`}
       />

@@ -857,17 +857,17 @@ export class PeerConnectionManager {
   setScreenStream(screenStream: MediaStream | null) {
     this.screenStream = screenStream;
     const activeStream = screenStream || this.localStream;
-    if (!activeStream) return;
+    const videoTrack = activeStream ? (activeStream.getVideoTracks()[0] || null) : null;
 
-    const videoTrack = activeStream.getVideoTracks()[0] || null;
     if (videoTrack) {
       (videoTrack as any).contentHint = screenStream ? 'detail' : 'motion';
-      for (const [, pc] of this.peerConnections) {
-        if (pc.connectionState === 'closed') continue;
-        const videoSender = pc.getSenders().find((s) => s.track?.kind === 'video');
-        if (videoSender) {
-          videoSender.replaceTrack(videoTrack).catch(() => {});
-        }
+    }
+
+    for (const [, pc] of this.peerConnections) {
+      if (pc.connectionState === 'closed') continue;
+      const videoSender = pc.getSenders().find((s) => s.track?.kind === 'video' || (!s.track && s.transport));
+      if (videoSender) {
+        videoSender.replaceTrack(videoTrack).catch(() => {});
       }
     }
   }

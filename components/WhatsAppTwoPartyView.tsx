@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Participant, VideoQualityId } from '@/lib/types';
-import { MicOff, ArrowLeftRight } from 'lucide-react';
+import { MicOff, ArrowLeftRight, Monitor } from 'lucide-react';
 
 interface WhatsAppTwoPartyViewProps {
   localParticipant?: Participant | null;
@@ -367,7 +367,9 @@ export const WhatsAppTwoPartyView: React.FC<WhatsAppTwoPartyViewProps> = ({
               ? { imageRendering: 'pixelated' }
               : {}),
           }}
-          className={`w-full h-full object-cover transition-opacity duration-200 ${
+          className={`w-full h-full ${
+            mainParticipant.isScreenSharing ? 'object-contain bg-black' : 'object-cover'
+          } transition-opacity duration-200 ${
             hasMainVideo ? 'opacity-100' : 'opacity-0 absolute pointer-events-none'
           }`}
         />
@@ -397,6 +399,12 @@ export const WhatsAppTwoPartyView: React.FC<WhatsAppTwoPartyViewProps> = ({
           <span className="text-xs sm:text-sm font-medium text-white truncate max-w-[140px] sm:max-w-[200px]">
             {mainParticipant.displayName || 'Participante'} {isMainLocal && '(Você)'}
           </span>
+          {mainParticipant.isScreenSharing && (
+            <span className="bg-[#8ab4f8] text-[#041e49] text-[10px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
+              <Monitor className="w-2.5 h-2.5" />
+              <span>Tela</span>
+            </span>
+          )}
           {mainParticipant.isAudioMuted && (
             <MicOff className="w-3.5 h-3.5 text-[#ea4335]" />
           )}
@@ -441,7 +449,9 @@ export const WhatsAppTwoPartyView: React.FC<WhatsAppTwoPartyViewProps> = ({
             transform: isPipLocal && !pipParticipant.isScreenSharing ? 'scaleX(-1) translateZ(0)' : 'translateZ(0)',
             willChange: 'transform',
           }}
-          className={`w-full h-full object-cover pointer-events-none transition-opacity duration-200 ${
+          className={`w-full h-full ${
+            pipParticipant.isScreenSharing ? 'object-contain bg-black' : 'object-cover'
+          } pointer-events-none transition-opacity duration-200 ${
             hasPipVideo ? 'opacity-100' : 'opacity-0 absolute'
           }`}
         />
@@ -468,9 +478,16 @@ export const WhatsAppTwoPartyView: React.FC<WhatsAppTwoPartyViewProps> = ({
 
         {/* PIP Bottom Name Tag */}
         <div className="absolute bottom-1.5 inset-x-1.5 flex items-center justify-between bg-black/60 backdrop-blur-sm px-2 py-1 rounded-md text-[10px] sm:text-xs text-white pointer-events-none border border-white/10">
-          <span className="truncate font-medium">
-            {isPipLocal ? 'Você' : pipParticipant.displayName || 'Participante'}
-          </span>
+          <div className="flex items-center gap-1 min-w-0">
+            <span className="truncate font-medium">
+              {isPipLocal ? 'Você' : pipParticipant.displayName || 'Participante'}
+            </span>
+            {pipParticipant.isScreenSharing && (
+              <span className="bg-[#8ab4f8] text-[#041e49] text-[9px] font-bold px-1 rounded shrink-0">
+                Tela
+              </span>
+            )}
+          </div>
           {pipParticipant.isAudioMuted && (
             <MicOff className="w-2.5 h-2.5 text-[#ea4335] shrink-0 ml-1" />
           )}

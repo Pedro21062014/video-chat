@@ -1184,7 +1184,10 @@ export default function MeetingApp() {
   // Dynamic Grid & Speaker Spotlight layout calculation
   const totalCount = allTiles.length;
 
-  // 1. Mobile 2-party view: WhatsApp full screen + PIP draggable corner box
+  // 1. Single participant (alone in room) - centered elegant rectangle
+  const isSingleParticipant = totalCount === 1;
+
+  // 2. Mobile 2-party view: WhatsApp full screen + PIP draggable corner box
   const shouldRenderWhatsAppView =
     isMobile &&
     totalCount === 2 &&
@@ -1192,16 +1195,16 @@ export default function MeetingApp() {
     uniqueRemoteParticipants.length > 0 &&
     Boolean(uniqueRemoteParticipants[0]);
 
-  // 2. 2 participants on desktop / tablet
+  // 3. 2 participants on desktop / tablet
   const isTwoParticipants = totalCount === 2;
 
-  // 3. 3 participants: 3 vertical rectangles side-by-side
+  // 4. 3 participants: 3 vertical rectangles side-by-side
   const isThreeParticipants = totalCount === 3;
 
-  // 4. 4 participants: 2x2 grid of 4 equal rectangles
+  // 5. 4 participants: 2x2 grid of 4 equal rectangles
   const isFourParticipants = totalCount === 4;
 
-  // 5. >4 participants: Active Speaker Spotlight View
+  // 6. >4 participants: Active Speaker Spotlight View
   const isMoreThanFour = totalCount > 4;
   const isSpeakerSpotlightView = isMoreThanFour && speakerViewOverride !== 'grid';
 
@@ -1401,23 +1404,27 @@ export default function MeetingApp() {
         /* Main Video Tiles Grid Container */
         <main
           id="video-tiles-grid"
-          className={`relative flex-1 min-h-0 p-2 sm:p-4 md:p-5 ${
-            isTwoParticipants
-              ? 'grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-5 md:gap-6 items-center justify-center max-w-6xl mx-auto w-full h-full'
-              : isThreeParticipants
-              ? 'grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 items-stretch justify-center max-w-7xl mx-auto w-full h-full'
-              : isFourParticipants
-              ? 'grid grid-cols-2 grid-rows-2 gap-3 sm:gap-4 items-center justify-center max-w-6xl mx-auto w-full h-full'
-              : 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4 items-center justify-center auto-rows-fr max-w-7xl mx-auto w-full h-full'
+          className={`relative flex-1 min-h-0 ${
+            isSingleParticipant
+              ? 'flex items-center justify-center p-3 sm:p-6 w-full h-full max-w-5xl mx-auto'
+              : `p-2 sm:p-4 md:p-5 ${
+                  isTwoParticipants
+                    ? 'grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-5 md:gap-6 items-center justify-center max-w-6xl mx-auto w-full h-full'
+                    : isThreeParticipants
+                    ? 'grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 items-stretch justify-center max-w-7xl mx-auto w-full h-full'
+                    : isFourParticipants
+                    ? 'grid grid-cols-2 grid-rows-2 gap-3 sm:gap-4 items-center justify-center max-w-6xl mx-auto w-full h-full'
+                    : 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4 items-center justify-center auto-rows-fr max-w-7xl mx-auto w-full h-full'
+                }`
           } overflow-hidden transition-all duration-200`}
         >
-          {totalCount === 1 && (
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-[#202124]/90 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-[#3c4043] flex items-center gap-2.5 text-xs text-[#e8eaed] shadow-lg">
-              <span className="w-2 h-2 rounded-full bg-[#81c995] animate-pulse" />
-              <span>Aguardando outros entrarem na reunião...</span>
+          {isSingleParticipant && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-[#202124]/90 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-[#3c4043] flex items-center gap-2.5 text-xs text-[#e8eaed] shadow-lg max-w-[90vw] truncate">
+              <span className="w-2 h-2 rounded-full bg-[#81c995] animate-pulse shrink-0" />
+              <span className="truncate">Aguardando outros entrarem na reunião...</span>
               <button
                 onClick={handleCopyLink}
-                className="text-[#8ab4f8] hover:text-white font-medium flex items-center gap-1 cursor-pointer transition-colors ml-1"
+                className="text-[#8ab4f8] hover:text-white font-medium flex items-center gap-1 cursor-pointer transition-colors ml-1 shrink-0"
               >
                 {copiedLinkBanner ? 'Copiado!' : 'Copiar link'}
               </button>
@@ -1425,16 +1432,33 @@ export default function MeetingApp() {
           )}
 
           {allTiles.map(({ participant, stream, isLocal }) => (
-            <VideoTile
+            <div
               key={participant.userId}
-              participant={participant}
-              stream={stream}
-              isLocal={isLocal}
-              isSpeaking={speakingUsersMap.get(participant.userId) ?? !participant.isAudioMuted}
-              onOpenSettings={isLocal ? () => setIsCameraSettingsOpen(true) : undefined}
-              onToggleVideo={isLocal ? handleToggleVideo : undefined}
-              currentQuality={isLocal ? videoQuality : undefined}
-            />
+              className={
+                isSingleParticipant
+                  ? 'w-full h-full max-w-full max-h-full flex items-center justify-center'
+                  : 'w-full h-full flex items-center justify-center'
+              }
+            >
+              <div
+                className={
+                  isSingleParticipant
+                    ? 'w-full h-full max-h-[82vh] max-w-[96vw] sm:max-w-4xl aspect-[3/4] sm:aspect-[4/3] md:aspect-video flex items-center justify-center transition-all duration-300'
+                    : 'w-full h-full flex items-center justify-center'
+                }
+              >
+                <VideoTile
+                  participant={participant}
+                  stream={stream}
+                  isLocal={isLocal}
+                  isSpeaking={speakingUsersMap.get(participant.userId) ?? !participant.isAudioMuted}
+                  onOpenSettings={isLocal ? () => setIsCameraSettingsOpen(true) : undefined}
+                  onToggleVideo={isLocal ? handleToggleVideo : undefined}
+                  currentQuality={isLocal ? videoQuality : undefined}
+                  className={isSingleParticipant ? 'rounded-2xl sm:rounded-3xl border border-[#3c4043]/80 shadow-2xl overflow-hidden' : ''}
+                />
+              </div>
+            </div>
           ))}
         </main>
       )}
