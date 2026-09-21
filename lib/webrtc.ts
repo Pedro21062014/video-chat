@@ -143,8 +143,9 @@ export class PeerConnectionManager {
 
   /**
    * Adaptive Bitrate & Quality Monitor:
-   * Inspects connection RTT, packet loss, bandwidth limitation, and dropped frames.
-   * If network is lagging, automatically decreases video quality to maintain ultra-fast, smooth streaming.
+   * Calibrated for great visual clarity even on moderate/slow internet with low latency.
+   * Tolerates normal jitter and only downgrades gracefully (floor capped at 480p/360p)
+   * under sustained network congestion without ruining visual quality.
    */
   private startAdaptiveStatsMonitor() {
     if (this.statsInterval) clearInterval(this.statsInterval);
@@ -153,7 +154,6 @@ export class PeerConnectionManager {
 
       let maxRtt = 0;
       let maxPacketLossRate = 0;
-      let isBandwidthLimited = false;
       let hasActiveConnection = false;
 
       for (const [, pc] of this.peerConnections) {
@@ -163,13 +163,6 @@ export class PeerConnectionManager {
         try {
           const stats = await pc.getStats();
           stats.forEach((report) => {
-            // Outbound video stats
-            if (report.type === 'outbound-rtp' && report.kind === 'video') {
-              if (report.qualityLimitationReason === 'bandwidth' || report.qualityLimitationReason === 'cpu') {
-                isBandwidthLimited = true;
-              }
-            }
-
             // Candidate pair RTT
             if (report.type === 'candidate-pair' && report.state === 'succeeded') {
               if (report.currentRoundTripTime !== undefined) {
@@ -197,23 +190,25 @@ export class PeerConnectionManager {
 
       if (!hasActiveConnection) return;
 
-      const isLagging = maxRtt > 320 || maxPacketLossRate > 4 || isBandwidthLimited;
+      // Only consider congested if sustained high loss (>10%) with high RTT (>500ms) or severe loss (>16%)
+      const isCongested = (maxPacketLossRate >= 10 && maxRtt > 500) || maxPacketLossRate >= 16 || maxRtt > 850;
+      const isHealthy = maxPacketLossRate < 3 && maxRtt < 320;
 
-      if (isLagging) {
+      if (isCongested) {
         this.badNetworkCycles += 1;
         this.goodNetworkCycles = 0;
 
-        // If lagging for 2 consecutive cycles (4s), automatically step down quality
-        if (this.badNetworkCycles >= 2) {
+        // Require 3 consecutive cycles (6s of real sustained congestion)
+        if (this.badNetworkCycles >= 3) {
           this.badNetworkCycles = 0;
           this.stepDownQuality(maxRtt, maxPacketLossRate);
         }
-      } else if (maxRtt < 130 && maxPacketLossRate < 1) {
+      } else if (isHealthy) {
         this.goodNetworkCycles += 1;
         this.badNetworkCycles = 0;
 
-        // If stable for 5 consecutive cycles (10s), try to gently step up toward preferred quality
-        if (this.goodNetworkCycles >= 5) {
+        // Recover after 3 cycles (6s of healthy network)
+        if (this.goodNetworkCycles >= 3) {
           this.goodNetworkCycles = 0;
           this.stepUpQuality();
         }
@@ -226,17 +221,21 @@ export class PeerConnectionManager {
 
   private stepDownQuality(rtt: number, loss: number) {
     if (!this.currentQualityOption) return;
-    const ladder: VideoQualityId[] = ['4k', '1080p', '720p', '480p', '360p', '240p', '144p'];
+    // Auto-downgrade ladder: protected floor at 480p (or 360p under extreme loss)
+    const ladder: VideoQualityId[] = ['4k', '1080p', '720p', '480p', '360p'];
     const currentIndex = ladder.indexOf(this.currentQualityOption.id);
 
-    if (currentIndex < ladder.length - 1) {
+    // Limit floor: don't auto-downgrade below 480p unless loss is above 20%
+    const maxIndex = loss > 20 ? ladder.indexOf('360p') : ladder.indexOf('480p');
+
+    if (currentIndex !== -1 && currentIndex < maxIndex) {
       const nextId = ladder[currentIndex + 1];
       const nextOpt = VIDEO_QUALITIES.find((q) => q.id === nextId);
       if (nextOpt) {
-        console.info(`[WebRTC Adaptive] Network slow (RTT: ${Math.round(rtt)}ms, Loss: ${loss.toFixed(1)}%). Auto-downgrading to ${nextId}`);
+        console.info(`[WebRTC Adaptive] Ajustando bitrate (RTT: ${Math.round(rtt)}ms, Perda: ${loss.toFixed(1)}%). Otimizando para ${nextId}`);
         this.applyVideoQuality(nextOpt).catch(() => {});
         if (this.onAdaptiveQualityCallback) {
-          this.onAdaptiveQualityCallback(nextId, 'Velocidade otimizada: qualidade diminuída automaticamente para evitar travamentos.');
+          this.onAdaptiveQualityCallback(nextId, `Taxa de bits otimizada para ${nextId} para garantir fluidez.`);
         }
       }
     }
@@ -244,19 +243,19 @@ export class PeerConnectionManager {
 
   private stepUpQuality() {
     if (!this.currentQualityOption) return;
-    const ladder: VideoQualityId[] = ['4k', '1080p', '720p', '480p', '360p', '240p', '144p'];
+    const ladder: VideoQualityId[] = ['4k', '1080p', '720p', '480p', '360p'];
     const currentIndex = ladder.indexOf(this.currentQualityOption.id);
     const targetIndex = ladder.indexOf(this.targetQualityId);
 
-    // Only step up if currently lower than the user's preferred target quality
+    // Only step up if currently lower than user's preferred quality
     if (currentIndex > targetIndex && currentIndex > 0) {
       const prevId = ladder[currentIndex - 1];
       const prevOpt = VIDEO_QUALITIES.find((q) => q.id === prevId);
       if (prevOpt) {
-        console.info(`[WebRTC Adaptive] Network recovered. Auto-recovering quality to ${prevId}`);
+        console.info(`[WebRTC Adaptive] Rede estável. Restaurando qualidade para ${prevId}`);
         this.applyVideoQuality(prevOpt).catch(() => {});
         if (this.onAdaptiveQualityCallback) {
-          this.onAdaptiveQualityCallback(prevId, 'Conexão estável: restaurando resolução com fluidez.');
+          this.onAdaptiveQualityCallback(prevId, `Conexão estável: resolução elevada para ${prevId}.`);
         }
       }
     }
@@ -666,6 +665,12 @@ export class PeerConnectionManager {
       }
       // Speed & smoothness priority: maintain framerate and low latency
       params.degradationPreference = 'maintain-framerate';
+      try {
+        (params.encodings[0] as unknown as { priority: string; networkPriority: string }).priority = 'high';
+        (params.encodings[0] as unknown as { priority: string; networkPriority: string }).networkPriority = 'high';
+      } catch {
+        // ignore
+      }
       sender.setParameters(params).catch(() => {});
     } catch {
       // ignore
