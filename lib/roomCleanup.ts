@@ -122,10 +122,13 @@ export async function checkAndCleanIfRoomEmpty(
       const p = d.data() as Participant;
       // Skip the user that is leaving
       if (leavingUserId && p.userId === leavingUserId) return;
-      // Check if participant is alive (heartbeat within 45s)
+      // Check if participant is alive (heartbeat within 10s)
       const lastSeen = p.lastSeen || p.joinedAt || 0;
-      if (now - lastSeen < 45000) {
+      if (now - lastSeen < 10000) {
         activeParticipants.push(p);
+      } else {
+        // Clean up lingering stale participant document
+        deleteDoc(d.ref).catch(() => {});
       }
     });
 

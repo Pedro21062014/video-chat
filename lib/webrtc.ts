@@ -539,21 +539,22 @@ export class PeerConnectionManager {
         if (this.currentQualityOption) {
           this.applyQualityToPeer(pc, this.currentQualityOption).catch(() => {});
         }
+      } else if (pc.connectionState === 'closed') {
+        this.onPeerDisconnectCallback?.(targetUserId);
       } else if (pc.connectionState === 'disconnected') {
-        // Network fluctuation: give it 4 seconds to self-heal before restarting ICE
         if (!this.reconnectTimers.has(targetUserId)) {
           const timer = setTimeout(() => {
             this.reconnectTimers.delete(targetUserId);
-            if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-              console.info(`[WebRTC] Auto-recovering disconnected peer ${targetUserId} with ICE restart`);
-              this.restartConnection(targetUserId);
+            if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+              console.info(`[WebRTC] Peer ${targetUserId} disconnected.`);
+              this.onPeerDisconnectCallback?.(targetUserId);
             }
-          }, 4000);
+          }, 2500);
           this.reconnectTimers.set(targetUserId, timer);
         }
       } else if (pc.connectionState === 'failed') {
-        console.warn(`[WebRTC] Connection failed with ${targetUserId}, restarting connection...`);
-        this.restartConnection(targetUserId);
+        console.warn(`[WebRTC] Connection failed with ${targetUserId}`);
+        this.onPeerDisconnectCallback?.(targetUserId);
       }
     };
 

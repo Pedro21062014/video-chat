@@ -10,9 +10,9 @@ import {
 } from 'firebase/firestore';
 
 const MAX_CALLS_PER_SESSION = 3;
-const STALE_TIMEOUT_MS = 45000; // 45 seconds without heartbeat = stale session
+const STALE_TIMEOUT_MS = 10000; // 10 seconds without heartbeat = stale session
 
-function getClientId(): string {
+export function getClientId(): string {
   if (typeof window === 'undefined') return 'server';
   try {
     let id = localStorage.getItem('videomeet_client_id');

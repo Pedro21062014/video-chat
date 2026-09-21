@@ -43,6 +43,7 @@ import {
   registerCallSession,
   sendCallHeartbeat,
   leaveCallSession,
+  getClientId,
 } from '@/lib/callsLimit';
 import { Info, Copy, Check, LayoutGrid, Volume2, UserCheck, Sparkles } from 'lucide-react';
 
@@ -368,10 +369,15 @@ export default function MeetingApp() {
       (peerId) => {
         connectedPeersRef.current.delete(peerId);
         setRemoteStreams((prev) => {
+          if (!prev.has(peerId)) return prev;
           const next = new Map(prev);
           next.delete(peerId);
           return next;
         });
+        setParticipants((prev) => prev.filter((p) => p.userId !== peerId));
+        if (targetRoom) {
+          deleteDoc(doc(db, 'rooms', targetRoom, 'participants', peerId)).catch(() => {});
+        }
       },
       (adaptiveQualityId, reason) => {
         setVideoQuality(adaptiveQualityId);
@@ -682,7 +688,7 @@ export default function MeetingApp() {
     setNotificationMessage('Você encerrou a reunião para todos os participantes.');
   };
 
-  // Heartbeat to keep participant document active in Firestore & active IP calls slot active
+  // Heartbeat to keep participant document active in Firestore & active IP calls slot active (every 3s)
   useEffect(() => {
     if (!isInRoom || !roomId || !currentUserId) return;
     const interval = setInterval(async () => {
@@ -695,22 +701,68 @@ export default function MeetingApp() {
       } catch {
         // ignore
       }
-    }, 15000);
+    }, 3000);
     return () => clearInterval(interval);
   }, [isInRoom, roomId, currentUserId]);
 
-  // Cleanup on window/tab close (beforeunload and pagehide)
+  // Instant cleanup when closing window, tab, or navigating away (beforeunload, pagehide, unload)
   useEffect(() => {
     if (!isInRoom || !roomId || !currentUserId) return;
 
-    const handleUnload = () => {
+    const executeImmediateLeave = () => {
+      const clientId = getClientId();
+      const payload = JSON.stringify({ roomId, userId: currentUserId, clientId });
+
+      // 1. Web standard guaranteed transmission on unload (Beacon API)
+      if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+        try {
+          const blob = new Blob([payload], { type: 'application/json' });
+          navigator.sendBeacon('/api/rooms/leave', blob);
+        } catch {
+          // ignore
+        }
+      }
+
+      // 2. Fetch with keepalive (survives tab closure in modern browsers)
       try {
-        leaveCallSession(roomId, currentUserId).catch(() => {});
+        fetch('/api/rooms/leave', {
+          method: 'POST',
+          body: payload,
+          headers: { 'Content-Type': 'application/json' },
+          keepalive: true,
+        }).catch(() => {});
       } catch {
         // ignore
       }
 
+      // 3. Immediately turn off camera and microphone tracks
+      if (localStreamRef.current) {
+        try {
+          localStreamRef.current.getTracks().forEach((t) => t.stop());
+        } catch {
+          // ignore
+        }
+      }
+      if (screenStream) {
+        try {
+          screenStream.getTracks().forEach((t) => t.stop());
+        } catch {
+          // ignore
+        }
+      }
+
+      // 4. Tear down WebRTC connections immediately so peers detect socket disconnect instantly
+      if (webrtcManagerRef.current) {
+        try {
+          webrtcManagerRef.current.closeAll().catch(() => {});
+        } catch {
+          // ignore
+        }
+      }
+
+      // 5. Fire direct Firestore deletion and session cleanup
       try {
+        leaveCallSession(roomId, currentUserId).catch(() => {});
         const pRef = doc(db, 'rooms', roomId, 'participants', currentUserId);
         deleteDoc(pRef).catch(() => {});
       } catch {
@@ -718,13 +770,49 @@ export default function MeetingApp() {
       }
     };
 
-    window.addEventListener('beforeunload', handleUnload);
-    window.addEventListener('pagehide', handleUnload);
+    window.addEventListener('beforeunload', executeImmediateLeave);
+    window.addEventListener('pagehide', executeImmediateLeave);
+    window.addEventListener('unload', executeImmediateLeave);
 
     return () => {
-      window.removeEventListener('beforeunload', handleUnload);
-      window.removeEventListener('pagehide', handleUnload);
+      window.removeEventListener('beforeunload', executeImmediateLeave);
+      window.removeEventListener('pagehide', executeImmediateLeave);
+      window.removeEventListener('unload', executeImmediateLeave);
     };
+  }, [isInRoom, roomId, currentUserId, screenStream]);
+
+  // Active supervisor to prune disconnected/ghost participants even if no Firestore event arrives
+  useEffect(() => {
+    if (!isInRoom || !roomId || !currentUserId) return;
+
+    const pruner = setInterval(() => {
+      const now = Date.now();
+      setParticipants((prev) => {
+        let changed = false;
+        const filtered = prev.filter((p) => {
+          if (p.userId === currentUserId) return true;
+          const lastSeen = p.lastSeen || p.joinedAt || 0;
+          // Stale if no heartbeat within 8 seconds
+          const isAlive = now - lastSeen < 8000;
+          if (!isAlive) {
+            changed = true;
+            // Clean up ghost participant doc in Firestore
+            deleteDoc(doc(db, 'rooms', roomId, 'participants', p.userId)).catch(() => {});
+            // Remove remote stream
+            setRemoteStreams((streams) => {
+              if (!streams.has(p.userId)) return streams;
+              const next = new Map(streams);
+              next.delete(p.userId);
+              return next;
+            });
+          }
+          return isAlive;
+        });
+        return changed ? filtered : prev;
+      });
+    }, 2500);
+
+    return () => clearInterval(pruner);
   }, [isInRoom, roomId, currentUserId]);
 
   // Sync Firestore Room Realtime Data
@@ -754,11 +842,22 @@ export default function MeetingApp() {
     const unsubscribeParticipants = onSnapshot(participantsRef, (snapshot) => {
       const list: Participant[] = [];
       const seen = new Set<string>();
+      const now = Date.now();
+
       snapshot.forEach((d) => {
         const data = d.data() as Participant;
-        if (data.userId && !seen.has(data.userId)) {
+        if (!data.userId || seen.has(data.userId)) return;
+
+        const isSelf = data.userId === currentUserId;
+        const lastSeen = data.lastSeen || data.joinedAt || 0;
+        const isAlive = isSelf || now - lastSeen < 8000;
+
+        if (isAlive) {
           seen.add(data.userId);
           list.push(data);
+        } else {
+          // Clean up lingering stale participant doc immediately
+          deleteDoc(d.ref).catch(() => {});
         }
       });
       setParticipants(list);
