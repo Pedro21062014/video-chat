@@ -11,6 +11,7 @@ import {
 import { db } from './firebase';
 import { VideoQualityOption, VideoQualityId, VIDEO_QUALITIES, SignalMessage } from './types';
 
+// High-reliability global STUN servers for robust NAT traversal
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
@@ -19,6 +20,7 @@ const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun4.l.google.com:19302' },
   { urls: 'stun:stun.cloudflare.com:3478' },
   { urls: 'stun:stun.services.mozilla.com:3478' },
+  { urls: 'stun:stun.relay.metered.ca:80' },
 ];
 
 export function formatPeerId(roomId: string, userId: string): string {
@@ -35,6 +37,35 @@ export function parseUserIdFromPeerId(peerId: string): string {
   return peerId;
 }
 
+/**
+ * Optimizes SDP for ultra-low latency, in-band FEC error correction (no audio loss),
+ * and instant video bitrates without slow ramp-up probing.
+ */
+function optimizeSdp(sdp: string): string {
+  let modifiedSdp = sdp;
+
+  // 1. Audio Optimization: Opus 10ms packet duration, FEC error correction, 48kHz voice
+  if (modifiedSdp.includes('opus/48000')) {
+    modifiedSdp = modifiedSdp.replace(
+      /a=fmtp:(\d+)(.*opus\/48000.*)/gi,
+      (match, pt, rest) => {
+        if (rest.includes('useinbandfec=1')) return match;
+        return `a=fmtp:${pt} minptime=10;useinbandfec=1;maxaveragebitrate=64000;stereo=0;sprop-stereo=0;cbr=1;${rest}`;
+      }
+    );
+  }
+
+  // 2. Video Optimization: start bitrate at 900kbps (no slow initial ramp) and min bitrate 350kbps
+  if (modifiedSdp.includes('m=video')) {
+    modifiedSdp = modifiedSdp.replace(
+      /(a=mid:video\r?\n)/gi,
+      `$1a=fmtp:96 x-google-min-bitrate=350;x-google-start-bitrate=900;x-google-max-bitrate=2200\r\n`
+    );
+  }
+
+  return modifiedSdp;
+}
+
 export class PeerConnectionManager {
   private roomId: string;
   private localUserId: string;
@@ -46,8 +77,10 @@ export class PeerConnectionManager {
   private remoteStreams: Map<string, MediaStream> = new Map();
   private pendingCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
   private currentRemoteUserIds: Set<string> = new Set();
-  private connectionAttempts: Map<string, number> = new Map();
-  private isNegotiating: Map<string, boolean> = new Map();
+  private isMakingOffer: Map<string, boolean> = new Map();
+  private ignoreOffer: Map<string, boolean> = new Map();
+  private isSettingRemoteAnswerPending: Map<string, boolean> = new Map();
+  private reconnectTimers: Map<string, NodeJS.Timeout> = new Map();
   private supervisorInterval: NodeJS.Timeout | null = null;
   private statsInterval: NodeJS.Timeout | null = null;
   private unsubscribeSignals: Unsubscribe | null = null;
@@ -122,13 +155,13 @@ export class PeerConnectionManager {
         }
       );
 
-      // 2. Start supervisor loop to auto-heal disconnected peers
+      // 2. Start supervisor loop for health monitoring and auto-recovery
       this.startSupervisor();
 
-      // 3. Start Adaptive Quality Monitor for speed optimization & automatic downgrade
+      // 3. Start Adaptive Quality Monitor for speed optimization & low latency
       this.startAdaptiveStatsMonitor();
 
-      console.info(`[WebRTC] Signaling and speed optimization active for room ${this.roomId}`);
+      console.info(`[WebRTC] Engine active for room ${this.roomId}`);
     } catch (err) {
       console.error('[WebRTC] Failed to start signaling:', err);
     }
@@ -138,14 +171,13 @@ export class PeerConnectionManager {
     if (this.supervisorInterval) clearInterval(this.supervisorInterval);
     this.supervisorInterval = setInterval(() => {
       this.reconcileConnections();
-    }, 2500);
+    }, 3000);
   }
 
   /**
    * Adaptive Bitrate & Quality Monitor:
-   * Calibrated for great visual clarity even on moderate/slow internet with low latency.
-   * Tolerates normal jitter and only downgrades gracefully (floor capped at 480p/360p)
-   * under sustained network congestion without ruining visual quality.
+   * Calibrated for great visual clarity with ultra-low latency even on moderate internet.
+   * Tolerates normal jitter and only downgrades gracefully under sustained network congestion.
    */
   private startAdaptiveStatsMonitor() {
     if (this.statsInterval) clearInterval(this.statsInterval);
@@ -190,9 +222,9 @@ export class PeerConnectionManager {
 
       if (!hasActiveConnection) return;
 
-      // Only consider congested if sustained high loss (>10%) with high RTT (>500ms) or severe loss (>16%)
-      const isCongested = (maxPacketLossRate >= 10 && maxRtt > 500) || maxPacketLossRate >= 16 || maxRtt > 850;
-      const isHealthy = maxPacketLossRate < 3 && maxRtt < 320;
+      // Only consider congested if sustained high loss (>12%) with high RTT (>500ms) or severe loss (>18%)
+      const isCongested = (maxPacketLossRate >= 12 && maxRtt > 500) || maxPacketLossRate >= 18 || maxRtt > 850;
+      const isHealthy = maxPacketLossRate < 3 && maxRtt < 300;
 
       if (isCongested) {
         this.badNetworkCycles += 1;
@@ -221,7 +253,6 @@ export class PeerConnectionManager {
 
   private stepDownQuality(rtt: number, loss: number) {
     if (!this.currentQualityOption) return;
-    // Auto-downgrade ladder: protected floor at 480p (or 360p under extreme loss)
     const ladder: VideoQualityId[] = ['4k', '1080p', '720p', '480p', '360p'];
     const currentIndex = ladder.indexOf(this.currentQualityOption.id);
 
@@ -232,7 +263,7 @@ export class PeerConnectionManager {
       const nextId = ladder[currentIndex + 1];
       const nextOpt = VIDEO_QUALITIES.find((q) => q.id === nextId);
       if (nextOpt) {
-        console.info(`[WebRTC Adaptive] Ajustando bitrate (RTT: ${Math.round(rtt)}ms, Perda: ${loss.toFixed(1)}%). Otimizando para ${nextId}`);
+        console.info(`[WebRTC Adaptive] Ajustando taxa (RTT: ${Math.round(rtt)}ms, Perda: ${loss.toFixed(1)}%). Otimizando para ${nextId}`);
         this.applyVideoQuality(nextOpt).catch(() => {});
         if (this.onAdaptiveQualityCallback) {
           this.onAdaptiveQualityCallback(nextId, `Taxa de bits otimizada para ${nextId} para garantir fluidez.`);
@@ -275,21 +306,14 @@ export class PeerConnectionManager {
           pc.iceConnectionState === 'completed');
 
       if (!isConnected) {
-        // Deterministic initiator: the user with alphabetically greater ID initiates the call
+        // W3C Perfect Negotiation: deterministic initiator (alphabetically greater ID) initiates initial offer
         const isPrimaryInitiator = this.localUserId > targetUserId;
-        const attempts = this.connectionAttempts.get(targetUserId) || 0;
 
-        // Initiator starts immediately; receiver acts as fallback after 3 supervisor cycles (7.5s)
-        if (isPrimaryInitiator || attempts >= 3) {
-          if (!this.isNegotiating.get(targetUserId)) {
-            this.sendOffer(targetUserId).catch((err) => {
-              console.warn(`[WebRTC] Error in supervisor offer to ${targetUserId}:`, err);
-            });
+        if (!pc || pc.connectionState === 'new' || pc.connectionState === 'closed') {
+          if (isPrimaryInitiator) {
+            this.sendOffer(targetUserId).catch(() => {});
           }
         }
-        this.connectionAttempts.set(targetUserId, attempts + 1);
-      } else {
-        this.connectionAttempts.delete(targetUserId);
       }
     }
   }
@@ -300,7 +324,7 @@ export class PeerConnectionManager {
   syncParticipants(remoteUserIds: string[]) {
     this.currentRemoteUserIds = new Set(remoteUserIds);
 
-    // Clean up participants who left the room
+    // Clean up participants who completely left the room in Firestore
     for (const [userId, pc] of this.peerConnections) {
       if (!this.currentRemoteUserIds.has(userId)) {
         try {
@@ -310,22 +334,30 @@ export class PeerConnectionManager {
         }
         this.peerConnections.delete(userId);
         this.remoteStreams.delete(userId);
-        this.connectionAttempts.delete(userId);
         this.pendingCandidates.delete(userId);
-        this.isNegotiating.delete(userId);
+        this.isMakingOffer.delete(userId);
+        this.ignoreOffer.delete(userId);
+        this.isSettingRemoteAnswerPending.delete(userId);
+
+        const timer = this.reconnectTimers.get(userId);
+        if (timer) {
+          clearTimeout(timer);
+          this.reconnectTimers.delete(userId);
+        }
+
         if (this.onPeerDisconnectCallback) {
           this.onPeerDisconnectCallback(userId);
         }
       }
     }
 
-    // Reconcile new/existing peers immediately
+    // Reconcile new peers immediately
     this.reconcileConnections();
   }
 
   private createPeerConnection(targetUserId: string): RTCPeerConnection {
     const existing = this.peerConnections.get(targetUserId);
-    if (existing && existing.connectionState !== 'closed' && existing.connectionState !== 'failed') {
+    if (existing && existing.connectionState !== 'closed') {
       return existing;
     }
 
@@ -340,6 +372,8 @@ export class PeerConnectionManager {
     const pc = new RTCPeerConnection({
       iceServers: ICE_SERVERS,
       iceCandidatePoolSize: 10,
+      bundlePolicy: 'max-bundle',
+      rtcpMuxPolicy: 'require',
     });
 
     this.peerConnections.set(targetUserId, pc);
@@ -351,9 +385,25 @@ export class PeerConnectionManager {
       }
     };
 
-    // 2. Track / Stream Reception Handler with instant reactivity
+    // 2. Track / Stream Reception Handler with zero-latency buffer
     pc.ontrack = (event) => {
       console.info(`[WebRTC] Received ${event.track.kind} track from peer ${targetUserId}`);
+      
+      // Optimize receiver jitter buffer for real-time responsiveness
+      try {
+        const receivers = pc.getReceivers();
+        receivers.forEach((rec) => {
+          if ('playoutDelayHint' in rec) {
+            (rec as unknown as { playoutDelayHint: number }).playoutDelayHint = 0.02; // 20ms buffer
+          }
+          if ('jitterBufferTarget' in rec) {
+            (rec as unknown as { jitterBufferTarget: number }).jitterBufferTarget = 20; // 20ms
+          }
+        });
+      } catch {
+        // ignore
+      }
+
       let remoteStream = this.remoteStreams.get(targetUserId);
       if (!remoteStream) {
         if (event.streams && event.streams[0]) {
@@ -392,29 +442,63 @@ export class PeerConnectionManager {
       event.track.addEventListener('ended', handleTrackUpdate);
     };
 
-    // 3. Connection State Change Handler
+    // 3. Connection State Change Handler with Intelligent Auto-Recovery (No sudden drops)
     pc.onconnectionstatechange = () => {
       console.info(`[WebRTC] Connection state with ${targetUserId}: ${pc.connectionState}`);
       if (pc.connectionState === 'connected') {
-        this.connectionAttempts.delete(targetUserId);
-        this.isNegotiating.set(targetUserId, false);
+        const timer = this.reconnectTimers.get(targetUserId);
+        if (timer) {
+          clearTimeout(timer);
+          this.reconnectTimers.delete(targetUserId);
+        }
 
-        // Apply quality settings immediately upon connection
+        // Apply quality & low-latency settings immediately upon connection
         if (this.currentQualityOption) {
           this.applyQualityToPeer(pc, this.currentQualityOption).catch(() => {});
         }
-      } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-        this.isNegotiating.set(targetUserId, false);
+      } else if (pc.connectionState === 'disconnected') {
+        // Network fluctuation: give it 4 seconds to self-heal before restarting ICE
+        if (!this.reconnectTimers.has(targetUserId)) {
+          const timer = setTimeout(() => {
+            this.reconnectTimers.delete(targetUserId);
+            if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+              console.info(`[WebRTC] Auto-recovering disconnected peer ${targetUserId} with ICE restart`);
+              this.restartConnection(targetUserId);
+            }
+          }, 4000);
+          this.reconnectTimers.set(targetUserId, timer);
+        }
+      } else if (pc.connectionState === 'failed') {
+        console.warn(`[WebRTC] Connection failed with ${targetUserId}, restarting connection...`);
+        this.restartConnection(targetUserId);
       }
     };
 
     pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-        this.connectionAttempts.delete(targetUserId);
+      if (pc.iceConnectionState === 'failed') {
+        this.restartConnection(targetUserId);
       }
     };
 
     return pc;
+  }
+
+  private restartConnection(targetUserId: string) {
+    if (!this.isListening || !this.currentRemoteUserIds.has(targetUserId)) return;
+    const pc = this.peerConnections.get(targetUserId);
+    if (pc) {
+      try {
+        if ('restartIce' in pc) {
+          pc.restartIce();
+        }
+      } catch {
+        // ignore
+      }
+    }
+    // Polite peer pattern: higher ID sends offer to re-negotiate
+    if (this.localUserId > targetUserId) {
+      this.sendOffer(targetUserId).catch(() => {});
+    }
   }
 
   private addTracksToConnection(pc: RTCPeerConnection) {
@@ -459,10 +543,10 @@ export class PeerConnectionManager {
 
   async sendOffer(targetUserId: string) {
     if (targetUserId === this.localUserId) return;
-    this.isNegotiating.set(targetUserId, true);
+    this.isMakingOffer.set(targetUserId, true);
 
     try {
-      console.info(`[WebRTC] Creating and sending offer to ${targetUserId}...`);
+      console.info(`[WebRTC] Sending optimized offer to ${targetUserId}...`);
       const pc = this.createPeerConnection(targetUserId);
       this.addTracksToConnection(pc);
 
@@ -471,49 +555,98 @@ export class PeerConnectionManager {
         offerToReceiveVideo: true,
       });
 
-      await pc.setLocalDescription(offer);
+      if (pc.signalingState !== 'stable') return;
+
+      const optimizedSdp = optimizeSdp(offer.sdp || '');
+      await pc.setLocalDescription({
+        type: offer.type,
+        sdp: optimizedSdp,
+      });
 
       await this.sendSignal(targetUserId, 'offer', {
         type: offer.type,
-        sdp: offer.sdp,
+        sdp: optimizedSdp,
       });
     } catch (err) {
       console.warn(`[WebRTC] Failed to send offer to ${targetUserId}:`, err);
-      this.isNegotiating.set(targetUserId, false);
+    } finally {
+      this.isMakingOffer.set(targetUserId, false);
     }
   }
 
+  /**
+   * Perfect Negotiation Pattern:
+   * Handles offer collisions (glare) smoothly without connection drops or race conditions.
+   */
   private async handleIncomingSignal(signal: SignalMessage) {
     const senderId = signal.from;
     if (!senderId || senderId === this.localUserId) return;
 
+    // Deterministic politeness: peer with smaller userId is polite and yields during collisions
+    const isPolite = this.localUserId < senderId;
+
     try {
       if (signal.type === 'offer') {
-        console.info(`[WebRTC] Received offer from ${senderId}`);
+        const offerData = typeof signal.payload === 'string' ? JSON.parse(signal.payload) : signal.payload;
         const pc = this.createPeerConnection(senderId);
         this.addTracksToConnection(pc);
 
-        const offerData = typeof signal.payload === 'string' ? JSON.parse(signal.payload) : signal.payload;
-        await pc.setRemoteDescription(new RTCSessionDescription(offerData));
+        const offerCollision = this.isMakingOffer.get(senderId) || pc.signalingState !== 'stable';
+        const shouldIgnore = !isPolite && offerCollision;
+        this.ignoreOffer.set(senderId, shouldIgnore);
 
-        // Drain queued candidates
+        if (shouldIgnore) {
+          console.warn(`[WebRTC] Glare detected with ${senderId}; impolite peer ignoring offer collision.`);
+          return;
+        }
+
+        if (offerCollision && isPolite) {
+          // Polite peer yields by rolling back local offer
+          console.info(`[WebRTC] Glare detected with ${senderId}; polite peer yielding.`);
+          try {
+            await pc.setLocalDescription({ type: 'rollback' });
+          } catch {
+            // ignore rollback error
+          }
+        }
+
+        const optimizedRemoteSdp = optimizeSdp(offerData.sdp || '');
+        await pc.setRemoteDescription(new RTCSessionDescription({
+          type: offerData.type,
+          sdp: optimizedRemoteSdp,
+        }));
+
+        // Drain queued ICE candidates
         await this.drainPendingCandidates(senderId, pc);
 
         const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
+        const optimizedAnswerSdp = optimizeSdp(answer.sdp || '');
+
+        await pc.setLocalDescription({
+          type: answer.type,
+          sdp: optimizedAnswerSdp,
+        });
 
         await this.sendSignal(senderId, 'answer', {
           type: answer.type,
-          sdp: answer.sdp,
+          sdp: optimizedAnswerSdp,
         });
       } else if (signal.type === 'answer') {
-        console.info(`[WebRTC] Received answer from ${senderId}`);
         const pc = this.peerConnections.get(senderId);
-        if (pc && (pc.signalingState === 'have-local-offer' || pc.signalingState === 'have-remote-pranswer')) {
-          const answerData = typeof signal.payload === 'string' ? JSON.parse(signal.payload) : signal.payload;
-          await pc.setRemoteDescription(new RTCSessionDescription(answerData));
-          await this.drainPendingCandidates(senderId, pc);
-          this.isNegotiating.set(senderId, false);
+        if (pc && !this.ignoreOffer.get(senderId)) {
+          if (pc.signalingState === 'have-local-offer' || pc.signalingState === 'have-remote-pranswer') {
+            const answerData = typeof signal.payload === 'string' ? JSON.parse(signal.payload) : signal.payload;
+            const optimizedAnswerSdp = optimizeSdp(answerData.sdp || '');
+
+            this.isSettingRemoteAnswerPending.set(senderId, true);
+            await pc.setRemoteDescription(new RTCSessionDescription({
+              type: answerData.type,
+              sdp: optimizedAnswerSdp,
+            }));
+            this.isSettingRemoteAnswerPending.set(senderId, false);
+
+            await this.drainPendingCandidates(senderId, pc);
+          }
         }
       } else if (signal.type === 'candidate') {
         const candidateData = typeof signal.payload === 'string' ? JSON.parse(signal.payload) : signal.payload;
@@ -524,7 +657,7 @@ export class PeerConnectionManager {
           try {
             await pc.addIceCandidate(new RTCIceCandidate(candidateData));
           } catch (err) {
-            console.warn(`[WebRTC] Could not add ICE candidate from ${senderId}:`, err);
+            console.warn(`[WebRTC] ICE candidate addition error:`, err);
           }
         } else {
           // Queue candidate until remoteDescription is ready
@@ -547,7 +680,7 @@ export class PeerConnectionManager {
       try {
         await pc.addIceCandidate(new RTCIceCandidate(candidateData));
       } catch (err) {
-        console.warn(`[WebRTC] Failed to add queued candidate from ${senderId}:`, err);
+        console.warn(`[WebRTC] Failed to add queued candidate:`, err);
       }
     }
     this.pendingCandidates.delete(senderId);
@@ -709,9 +842,15 @@ export class PeerConnectionManager {
       this.unsubscribeSignals = null;
     }
 
-    this.connectionAttempts.clear();
+    for (const timer of this.reconnectTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.reconnectTimers.clear();
+
     this.pendingCandidates.clear();
-    this.isNegotiating.clear();
+    this.isMakingOffer.clear();
+    this.ignoreOffer.clear();
+    this.isSettingRemoteAnswerPending.clear();
     this.currentRemoteUserIds.clear();
 
     for (const [, pc] of this.peerConnections) {

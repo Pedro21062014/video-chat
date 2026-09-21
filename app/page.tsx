@@ -380,25 +380,32 @@ export default function MeetingApp() {
         const targetOpt = VIDEO_QUALITIES.find((q) => q.id === videoQuality) || VIDEO_QUALITIES[2];
         let stream: MediaStream | null = null;
 
+        // Standard low-latency high-quality voice audio constraints
+        const audioTrackConstraints: MediaTrackConstraints = {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        };
+
         if (!initialVideoMuted) {
           try {
             stream = await navigator.mediaDevices.getUserMedia({
               video: selectedCameraId
                 ? { deviceId: { ideal: selectedCameraId }, width: { ideal: targetOpt.width }, height: { ideal: targetOpt.height }, frameRate: { ideal: targetOpt.frameRate } }
                 : { facingMode: 'user', width: { ideal: targetOpt.width }, height: { ideal: targetOpt.height }, frameRate: { ideal: targetOpt.frameRate } },
-              audio: !initialAudioMuted,
+              audio: !initialAudioMuted ? audioTrackConstraints : false,
             });
           } catch {
             // Fallback: try basic video with audio
             try {
               stream = await navigator.mediaDevices.getUserMedia({
                 video: true,
-                audio: !initialAudioMuted,
+                audio: !initialAudioMuted ? audioTrackConstraints : false,
               });
             } catch {
               // Video permission failed or camera busy; try audio only
               try {
-                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream = await navigator.mediaDevices.getUserMedia({ audio: audioTrackConstraints });
                 setIsVideoMuted(true);
               } catch {
                 stream = new MediaStream();
@@ -410,7 +417,7 @@ export default function MeetingApp() {
         } else {
           // Video starts muted: acquire audio only
           try {
-            stream = await navigator.mediaDevices.getUserMedia({ audio: !initialAudioMuted });
+            stream = await navigator.mediaDevices.getUserMedia({ audio: !initialAudioMuted ? audioTrackConstraints : false });
           } catch {
             stream = new MediaStream();
           }
