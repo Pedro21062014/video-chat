@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Participant, VideoQualityId } from '@/lib/types';
-import { MicOff, ArrowLeftRight, Monitor } from 'lucide-react';
+import { MicOff, ArrowLeftRight, ScreenShare } from 'lucide-react';
 
 interface WhatsAppTwoPartyViewProps {
   localParticipant?: Participant | null;
@@ -401,7 +401,7 @@ export const WhatsAppTwoPartyView: React.FC<WhatsAppTwoPartyViewProps> = ({
           </span>
           {mainParticipant.isScreenSharing && (
             <span className="bg-[#8ab4f8] text-[#041e49] text-[10px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
-              <Monitor className="w-2.5 h-2.5" />
+              <ScreenShare className="w-2.5 h-2.5" />
               <span>Tela</span>
             </span>
           )}
