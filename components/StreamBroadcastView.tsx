@@ -25,6 +25,7 @@ import {
   Tv,
   Camera,
   Layers,
+  AlertTriangle,
 } from 'lucide-react';
 import { StreamRole, VideoQualityId, VIDEO_QUALITIES, StreamControlsOptions } from '@/lib/types';
 
@@ -48,6 +49,7 @@ interface StreamBroadcastViewProps {
   onChangeQuality: (quality: VideoQualityId) => void;
   onLeave: () => void;
   onOpenIntegrationDocs: () => void;
+  onRetry?: () => void;
 }
 
 export const StreamBroadcastView: React.FC<StreamBroadcastViewProps> = ({
@@ -69,6 +71,7 @@ export const StreamBroadcastView: React.FC<StreamBroadcastViewProps> = ({
   onChangeQuality,
   onLeave,
   onOpenIntegrationDocs,
+  onRetry,
 }) => {
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
@@ -78,13 +81,39 @@ export const StreamBroadcastView: React.FC<StreamBroadcastViewProps> = ({
   const [requiresUserInteractionForAudio, setRequiresUserInteractionForAudio] = useState(false);
   const [isPipActive, setIsPipActive] = useState(false);
   const [isVideoLoaded, setIsVideoLoaded] = useState(false);
+  const [isCameraInactive, setIsCameraInactive] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const cameraTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const isSender = role === 'sender';
   const activeStream = isSender ? localStream : remoteStream;
+
+  // 40-second Inactivity Timer when waiting for camera signal
+  useEffect(() => {
+    // If video is loaded or sender is muted intentionally, clear timer
+    if ((isVideoLoaded && Boolean(activeStream)) || (isSender && isVideoMuted && !isScreenSharing)) {
+      if (cameraTimeoutRef.current) {
+        clearTimeout(cameraTimeoutRef.current);
+        cameraTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    cameraTimeoutRef.current = setTimeout(() => {
+      setIsCameraInactive(true);
+    }, 40000);
+
+    return () => {
+      if (cameraTimeoutRef.current) {
+        clearTimeout(cameraTimeoutRef.current);
+        cameraTimeoutRef.current = null;
+      }
+    };
+  }, [isVideoLoaded, activeStream, isSender, isVideoMuted, isScreenSharing]);
 
   // Granular visibility rules
   const isCleanMode =
@@ -110,6 +139,7 @@ export const StreamBroadcastView: React.FC<StreamBroadcastViewProps> = ({
 
   const markVideoLoaded = useCallback(() => {
     setIsVideoLoaded(true);
+    setIsCameraInactive(false);
   }, []);
 
   // Optimized media stream binding & instantaneous frame detection
@@ -130,6 +160,7 @@ export const StreamBroadcastView: React.FC<StreamBroadcastViewProps> = ({
 
     const handleFrameReady = () => {
       setIsVideoLoaded(true);
+      setIsCameraInactive(false);
     };
 
     videoEl.addEventListener('loadeddata', handleFrameReady);
@@ -233,6 +264,31 @@ export const StreamBroadcastView: React.FC<StreamBroadcastViewProps> = ({
     }
   };
 
+  const handleRetryCamera = useCallback(() => {
+    setIsRetrying(true);
+    setIsCameraInactive(false);
+
+    // Force re-trigger play on video element
+    if (videoRef.current) {
+      if (activeStream) {
+        videoRef.current.srcObject = activeStream;
+        videoRef.current.play().catch(() => {});
+      }
+    }
+
+    // If sender had video muted, toggle it back on
+    if (isSender && isVideoMuted) {
+      onToggleVideo();
+    }
+
+    // Call parent retry handler if available
+    onRetry?.();
+
+    setTimeout(() => {
+      setIsRetrying(false);
+    }, 1000);
+  }, [activeStream, isSender, isVideoMuted, onToggleVideo, onRetry]);
+
   const showSkeleton =
     !isVideoMuted &&
     !isScreenSharing &&
@@ -253,7 +309,7 @@ export const StreamBroadcastView: React.FC<StreamBroadcastViewProps> = ({
           }`}
         >
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 bg-[#171920]/90 backdrop-blur-md px-3 py-1.5 rounded-full border border-[#2c303c] text-xs sm:text-sm">
+            <div className="flex items-center gap-2 bg-[#171921]/90 backdrop-blur-md px-3 py-1.5 rounded-full border border-[#2c303c] text-xs sm:text-sm">
               <span className="flex h-2.5 w-2.5 relative">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
@@ -319,8 +375,32 @@ export const StreamBroadcastView: React.FC<StreamBroadcastViewProps> = ({
           } ${isVideoLoaded && activeStream ? 'opacity-100' : 'opacity-0'}`}
         />
 
-        {/* CLEAN DIAGONAL SHIMMER EFFECT - ONLY IN CAMERA SPACE (NO FAKE TEXT/ROWS) */}
-        {((!isVideoLoaded || !activeStream) && !(isSender && isVideoMuted && !isScreenSharing)) && (
+        {/* 2A. Inactive Camera Warning (Triggered after 40 seconds without camera signal) */}
+        {isCameraInactive && !isVideoLoaded && !(isSender && isVideoMuted && !isScreenSharing) && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0c0e14] text-center p-6 z-20 select-none">
+            <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-center text-amber-400 mb-4 shadow-lg">
+              <AlertTriangle className="w-7 h-7 text-amber-400" />
+            </div>
+            <h3 className="text-base sm:text-lg font-medium text-white mb-1.5">
+              A câmera pode estar inativa
+            </h3>
+            <p className="text-xs sm:text-sm text-[#9aa0a6] max-w-sm mb-6 leading-relaxed">
+              {isSender
+                ? 'Nenhum sinal da sua câmera foi detectado nos últimos 40 segundos.'
+                : 'Nenhuma transmissão de vídeo recebida nos últimos 40 segundos.'}
+            </p>
+            <button
+              onClick={handleRetryCamera}
+              className="flex items-center gap-2 bg-[#1a73e8] hover:bg-[#1558b0] active:scale-95 text-white text-xs sm:text-sm font-medium px-5 py-2.5 rounded-full transition-all shadow-md cursor-pointer pointer-events-auto"
+            >
+              <RefreshCw className={`w-4 h-4 ${isRetrying ? 'animate-spin' : ''}`} />
+              <span>Tentar novamente</span>
+            </button>
+          </div>
+        )}
+
+        {/* 2B. CLEAN DIAGONAL SHIMMER EFFECT (Active during the 40s waiting period) */}
+        {!isCameraInactive && (!isVideoLoaded || !activeStream) && !(isSender && isVideoMuted && !isScreenSharing) && (
           <div className="absolute inset-0 w-full h-full bg-[#0c0e14] pointer-events-none select-none z-10 overflow-hidden">
             {/* Diagonal Shimmer Light Sweep */}
             <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -344,12 +424,12 @@ export const StreamBroadcastView: React.FC<StreamBroadcastViewProps> = ({
 
         {/* Unmute Prompt Banner if browser autoplay restricted audio */}
         {requiresUserInteractionForAudio && !isSender && (
-          <div className="absolute top-16 left-1/2 -translate-x-1/2 z-40 bg-[#1e1f23]/95 backdrop-blur-md px-5 py-2.5 rounded-full border border-amber-500/40 shadow-2xl flex items-center gap-3 animate-bounce">
-            <VolumeX className="w-4 h-4 text-amber-400" />
+          <div className="absolute top-16 left-1/2 -translate-x-1/2 z-40 bg-[#1e1f23]/95 backdrop-blur-md px-5 py-2.5 rounded-full border border-amber-500/40 shadow-2xl flex items-center gap-3">
+            <VolumeX className="w-4 h-4 text-amber-400 shrink-0" />
             <span className="text-xs sm:text-sm text-white font-medium">O áudio foi pausado pelo navegador.</span>
             <button
               onClick={handleUnmuteViewer}
-              className="bg-amber-500 hover:bg-amber-600 text-black text-xs font-bold px-3 py-1 rounded-full transition-colors cursor-pointer"
+              className="bg-amber-500 hover:bg-amber-600 text-black text-xs font-bold px-3 py-1 rounded-full transition-colors cursor-pointer shrink-0"
             >
               Ativar Som
             </button>

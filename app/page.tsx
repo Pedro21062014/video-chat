@@ -1209,6 +1209,42 @@ export default function MeetingApp() {
     }
   };
 
+  // Retry Camera Acquisition / WebRTC Refresh
+  const handleRetryCamera = async () => {
+    if (streamRole === 'sender') {
+      try {
+        const targetOpt = VIDEO_QUALITIES.find((q) => q.id === videoQuality) || VIDEO_QUALITIES[2];
+        const newMedia = await navigator.mediaDevices.getUserMedia({
+          video: activeCameraId
+            ? { deviceId: { ideal: activeCameraId }, width: { ideal: targetOpt.width }, height: { ideal: targetOpt.height } }
+            : { facingMode: 'user', width: { ideal: targetOpt.width }, height: { ideal: targetOpt.height } },
+          audio: !isAudioMuted,
+        });
+
+        const newVideoTrack = newMedia.getVideoTracks()[0];
+        if (newVideoTrack) {
+          if (!localStreamRef.current) {
+            localStreamRef.current = newMedia;
+          } else {
+            localStreamRef.current.getVideoTracks().forEach((t) => {
+              localStreamRef.current?.removeTrack(t);
+              t.stop();
+            });
+            localStreamRef.current.addTrack(newVideoTrack);
+          }
+          const updatedStream = new MediaStream(localStreamRef.current.getTracks());
+          setLocalStream(updatedStream);
+          setIsVideoMuted(false);
+          if (webrtcManagerRef.current) {
+            webrtcManagerRef.current.setLocalStream(localStreamRef.current);
+          }
+        }
+      } catch (err) {
+        console.warn('Camera retry failed:', err);
+      }
+    }
+  };
+
   // Switch Camera (Mobile / Webcams)
   const handleSwitchCamera = async () => {
     if (availableCameras.length <= 1 || !localStreamRef.current) return;
@@ -1445,6 +1481,7 @@ export default function MeetingApp() {
           onChangeQuality={handleChangeVideoQuality}
           onLeave={handleLeaveCall}
           onOpenIntegrationDocs={() => setIsDocsModalOpen(true)}
+          onRetry={handleRetryCamera}
         />
 
         {/* Integration & SDK Modal */}
