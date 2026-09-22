@@ -319,69 +319,12 @@ export const StreamBroadcastView: React.FC<StreamBroadcastViewProps> = ({
           } ${isVideoLoaded && activeStream ? 'opacity-100' : 'opacity-0'}`}
         />
 
-        {/* SKELETON EFFECT - ENTIRE CAMERA SPACE (NO TITLE, MATCHING EXAMPLE VIDEO) */}
+        {/* CLEAN DIAGONAL SHIMMER EFFECT - ONLY IN CAMERA SPACE (NO FAKE TEXT/ROWS) */}
         {((!isVideoLoaded || !activeStream) && !(isSender && isVideoMuted && !isScreenSharing)) && (
-          <div className="absolute inset-0 w-full h-full bg-[#0c0e14] flex flex-col justify-around py-8 px-6 sm:px-12 md:px-16 pointer-events-none select-none z-10 overflow-hidden">
-            {/* Skeleton Rows filling the whole camera space evenly */}
-            <div className="w-full flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className="w-2.5 h-2.5 rounded-full bg-white/[0.14] animate-pulse shrink-0" />
-                <div className="w-4/5 sm:w-3/5 h-3 sm:h-3.5 rounded-md bg-white/[0.09] animate-pulse" />
-              </div>
-              <div className="w-16 sm:w-20 h-3 sm:h-3.5 rounded-md bg-white/[0.07] animate-pulse shrink-0" />
-            </div>
-
-            <div className="w-full flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className="w-2.5 h-2.5 rounded-full bg-white/[0.12] animate-pulse shrink-0" />
-                <div className="w-full sm:w-4/5 h-3 sm:h-3.5 rounded-md bg-white/[0.08] animate-pulse" />
-              </div>
-              <div className="w-24 sm:w-28 h-3 sm:h-3.5 rounded-md bg-white/[0.07] animate-pulse shrink-0" />
-            </div>
-
-            <div className="w-full flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className="w-2.5 h-2.5 rounded-full bg-white/[0.11] animate-pulse shrink-0" />
-                <div className="w-3/5 sm:w-1/2 h-3 sm:h-3.5 rounded-md bg-white/[0.08] animate-pulse" />
-              </div>
-              <div className="w-14 sm:w-16 h-3 sm:h-3.5 rounded-md bg-white/[0.06] animate-pulse shrink-0" />
-            </div>
-
-            <div className="w-full flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className="w-2.5 h-2.5 rounded-full bg-white/[0.10] animate-pulse shrink-0" />
-                <div className="w-5/6 sm:w-3/4 h-3 sm:h-3.5 rounded-md bg-white/[0.08] animate-pulse" />
-              </div>
-              <div className="w-20 sm:w-24 h-3 sm:h-3.5 rounded-md bg-white/[0.06] animate-pulse shrink-0" />
-            </div>
-
-            <div className="w-full flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className="w-2.5 h-2.5 rounded-full bg-white/[0.12] animate-pulse shrink-0" />
-                <div className="w-2/3 sm:w-3/5 h-3 sm:h-3.5 rounded-md bg-white/[0.08] animate-pulse" />
-              </div>
-              <div className="w-16 sm:w-20 h-3 sm:h-3.5 rounded-md bg-white/[0.06] animate-pulse shrink-0" />
-            </div>
-
-            <div className="w-full flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className="w-2.5 h-2.5 rounded-full bg-white/[0.09] animate-pulse shrink-0" />
-                <div className="w-4/5 sm:w-2/3 h-3 sm:h-3.5 rounded-md bg-white/[0.07] animate-pulse" />
-              </div>
-              <div className="w-20 sm:w-24 h-3 sm:h-3.5 rounded-md bg-white/[0.05] animate-pulse shrink-0" />
-            </div>
-
-            <div className="w-full flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className="w-2.5 h-2.5 rounded-full bg-white/[0.08] animate-pulse shrink-0" />
-                <div className="w-3/4 sm:w-1/2 h-3 sm:h-3.5 rounded-md bg-white/[0.07] animate-pulse" />
-              </div>
-              <div className="w-14 sm:w-16 h-3 sm:h-3.5 rounded-md bg-white/[0.05] animate-pulse shrink-0" />
-            </div>
-
-            {/* Shimmer Light Reflection Sweep Across the Entire Camera Space */}
-            <div className="absolute inset-0 pointer-events-none overflow-hidden">
-              <div className="w-1/2 h-full bg-gradient-to-r from-transparent via-white/[0.10] to-transparent animate-shimmer -translate-x-full" />
+          <div className="absolute inset-0 w-full h-full bg-[#0c0e14] pointer-events-none select-none z-10 overflow-hidden">
+            {/* Diagonal Shimmer Light Sweep */}
+            <div className="absolute inset-0 overflow-hidden pointer-events-none">
+              <div className="absolute w-[60%] h-[250%] -top-[75%] -left-[30%] bg-gradient-to-r from-transparent via-white/[0.09] to-transparent animate-shimmer-diagonal" />
             </div>
           </div>
         )}

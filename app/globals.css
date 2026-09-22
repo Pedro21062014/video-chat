@@ -103,6 +103,19 @@
   animation: shimmer 2s infinite ease-in-out;
 }
 
+@keyframes shimmerDiagonal {
+  0% {
+    transform: translateX(-100%) skewX(-25deg);
+  }
+  100% {
+    transform: translateX(300%) skewX(-25deg);
+  }
+}
+
+.animate-shimmer-diagonal {
+  animation: shimmerDiagonal 2.2s infinite ease-in-out;
+}
+
 /* Google Meet Style Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
