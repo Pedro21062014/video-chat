@@ -1,0 +1,178 @@
+# ==============================================================================
+# VIDEOMEET - DOCUMENTAÇÃO TÉCNICA E GUIA DE INTEGRAÇÃO (LLMS & DEVELOPERS)
+# Versão: 2.1.0 | Protocolo: WebRTC P2P (Sem servidor de mídia pago / 100% Gratuito)
+# Formato: Texto Puro (Markdown Plaintext para consumo por IA e Agentes)
+# ==============================================================================
+
+## 1. VISÃO GERAL DA ARQUITETURA
+O VideoMeet é uma plataforma e SDK de videoconferência e transmissão de vídeo WebRTC
+Peer-to-Peer (P2P). A sinalização (SDP Offers/Answers e ICE Candidates) é gerenciada
+de forma serverless e sem custos de infraestrutura.
+
+A plataforma suporta dois modos operacionais principais:
+1. TRANSMISSÃO PURA (Modo Stream / Pareamento via Código):
+   - Transmissor (Sender): Capta a câmera ou tela local e transmite diretamente para o receptor.
+   - Receptor (Viewer): Recebe o streaming P2P em tempo real com baixa latência (<200ms).
+   - Ideal para: Câmeras de segurança, babá eletrônica, compartilhamento de tela de suporte, monitoramento, etc.
+
+2. SALA DE REUNIÃO COMPLETA (Modo Meeting):
+   - Grade adaptativa de participantes (desktop bento grid ou visualização estilo WhatsApp mobile com PIP arrastável).
+   - Chat em tempo real, reações de emoji flutuantes, levantar a mão, controle de microfone/câmera, seleção de qualidade (360p, 720p HD, 1080p Full HD) e compartilhamento de tela com ícone MonitorUp.
+
+---
+
+## 2. MODOS DE INTEGRAÇÃO VIA URL (IFRAME & POPUP)
+
+A integração mais rápida é feita via URL embedding em um <iframe> ou nova janela.
+
+### 2.1. Parâmetros de Query String Suportados
+
+| Parâmetro | Valores Possíveis | Padrão | Descrição |
+|---|---|---|---|
+| `mode` | `stream` \| `meeting` | `meeting` | Define se a sessão é apenas transmissão P2P ou reunião completa. |
+| `role` | `sender` \| `viewer` | `sender` | (Apenas em `mode=stream`): `sender` para transmitir; `viewer` para assistir. |
+| `room` | string (ex: `cam-101`, `abc-defg-hij`) | aleatório | O código da sala ou identificador de pareamento. |
+| `name` | string (ex: `Carlos`, `Camera Sala`) | `Convidado` | Nome exibido no tile de vídeo e chat. |
+| `embed` | `true` \| `false` | `false` | Remove cabeçalhos e otimiza o layout para exibição embutida/iframe. |
+| `audio` | `true` \| `false` | `true` | Estado inicial do microfone (`false` = mudo). |
+| `video` | `true` \| `false` | `true` | Estado inicial da câmera (`false` = câmera desligada). |
+| `quality` | `360p` \| `720p` \| `1080p` | `720p` | Resolução e taxa de quadros padrão do transmissor. |
+
+---
+
+## 3. EXEMPLOS PRÁTICOS DE URLS
+
+Assuma `https://videomeet.app` (ou o domínio onde o aplicativo estiver rodando):
+
+### A) Transmitir a câmera de um celular ou dispositivo (Transmissor):
+https://SEU_DOMINIO/?mode=stream&role=sender&room=sala-402&embed=true
+
+### B) Exibir o vídeo da câmera em outro site/dashboard (Receptor):
+https://SEU_DOMINIO/?mode=stream&role=viewer&room=sala-402&embed=true
+
+### C) Incorporar uma Reunião Completa de Vídeo:
+https://SEU_DOMINIO/?room=reuniao-equipe&name=João&embed=true
+
+---
+
+## 4. EXEMPLOS DE CÓDIGO DE INTEGRAÇÃO
+
+### 4.1. Código HTML Básico (Iframe Simples)
+```html
+<!-- Exemplo 1: Receptor de Transmissão de Câmera -->
+<iframe
+  src="https://SEU_DOMINIO/?mode=stream&role=viewer&room=camera-sala-01&embed=true"
+  width="100%"
+  height="480"
+  style="border: 0; border-radius: 12px; background: #000;"
+  allow="camera; microphone; display-capture; autoplay"
+  allowfullscreen
+></iframe>
+
+<!-- Exemplo 2: Transmissor de Câmera -->
+<iframe
+  src="https://SEU_DOMINIO/?mode=stream&role=sender&room=camera-sala-01&embed=true"
+  width="100%"
+  height="480"
+  style="border: 0; border-radius: 12px; background: #000;"
+  allow="camera; microphone; display-capture; autoplay"
+  allowfullscreen
+></iframe>
+```
+
+### 4.2. Componente React / Next.js
+```tsx
+import React from 'react';
+
+interface StreamViewerProps {
+  roomCode: string;
+  baseUrl?: string;
+}
+
+export function StreamViewer({ roomCode, baseUrl = window.location.origin }: StreamViewerProps) {
+  const streamUrl = `${baseUrl}/?mode=stream&role=viewer&room=${encodeURIComponent(roomCode)}&embed=true`;
+
+  return (
+    <div className="w-full aspect-video rounded-xl overflow-hidden shadow-2xl bg-black border border-neutral-800">
+      <iframe
+        src={streamUrl}
+        title={`Transmissão do canal ${roomCode}`}
+        className="w-full h-full border-0"
+        allow="camera; microphone; display-capture; autoplay"
+        allowFullScreen
+      />
+    </div>
+  );
+}
+```
+
+### 4.3. Utilizando o SDK JavaScript Embutido (`videomeet-sdk.js`)
+O script está disponível em `/videomeet-sdk.js`.
+
+```html
+<script src="https://SEU_DOMINIO/videomeet-sdk.js"></script>
+
+<div id="video-container" style="width: 100%; height: 500px;"></div>
+
+<script>
+  // 1. Criar uma sessão programaticamente
+  const session = VideoMeet.createSession({
+    mode: 'stream',     // 'stream' ou 'meeting'
+    role: 'viewer',     // 'sender' ou 'viewer'
+    room: 'canal-456',
+    embed: true,
+    audio: true,
+    video: true
+  });
+
+  console.log('URL da Sessão:', session.url);
+  console.log('Código da Sala:', session.roomCode);
+
+  // 2. Incorporar automaticamente no elemento HTML
+  VideoMeet.embed({
+    container: '#video-container',
+    mode: 'stream',
+    role: 'viewer',
+    room: 'canal-456',
+    width: '100%',
+    height: '100%'
+  });
+</script>
+```
+
+---
+
+## 5. PERMISSÕES E POLÍTICAS DE NAVEGADOR (CRÍTICO)
+
+1. **Atributo `allow` do Iframe**:
+   Os iframes DEVEM conter obrigatoriamente:
+   `allow="camera; microphone; display-capture; autoplay"`
+   Sem isso, o navegador bloqueará o acesso aos dispositivos de mídia.
+
+2. **Políticas de Autoplay com Áudio**:
+   Navegadores modernos (Chrome, Safari, Firefox, Edge) bloqueiam a reprodução
+   automática de áudio se não houver interação prévia do usuário na página.
+   O VideoMeet trata isso automaticamente iniciando o vídeo mudo e exibindo
+   um botão acessível de "Ativar Som" quando necessário.
+
+3. **Protocolo HTTPS**:
+   O WebRTC exige HTTPS (ou `http://localhost` para desenvolvimento). Ambientes HTTP
+   não seguros não possuem acesso às APIs `navigator.mediaDevices`.
+
+---
+
+## 6. SINALIZAÇÃO WEBRTC & CICLO DE VIDA
+- As salas armazenam ofertas (SDP Offer), respostas (SDP Answer) e candidatos ICE.
+- Quando uma aba é fechada ou o usuário clica em "Sair", os eventos de limpeza (`beforeunload`, `pagehide`)
+  removem o registro do participante, garantindo que ninguém fique "preso" como fantasma.
+- O organizador tem a opção de "Encerrar chamada para todos", que limpa todos os canais e
+  desconecta imediatamente todos os participantes da sessão.
+
+---
+
+## 7. RESUMO DE ENDPOINTS ESTÁTICOS
+- Documentação completa em TXT: `/docs.txt` e `/llms.txt`
+- SDK JavaScript pronto para uso: `/videomeet-sdk.js`
+- Aplicação Web: `/` (com suporte aos parâmetros de query string descritos)
+
+==============================================================================

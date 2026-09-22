@@ -1,0 +1,25 @@
+# VideoMeet - Technical API & Integration Documentation for LLMs
+# Full Documentation URL: /docs.txt
+# JavaScript SDK: /videomeet-sdk.js
+
+> Plataforma P2P WebRTC gratuita de videoconferência, chamadas em grupo e transmissão de câmera isolada via pareamento por código.
+
+## Formato de URLs de Integração
+- Modo Transmissão (Sender - Câmera/Tela): `/?mode=stream&role=sender&room={ROOM_CODE}&embed=true`
+- Modo Receptor (Viewer - Assistir): `/?mode=stream&role=viewer&room={ROOM_CODE}&embed=true`
+- Modo Reunião Completa: `/?room={ROOM_CODE}&name={USER_NAME}&embed=true`
+
+## Parâmetros Suportados
+- `mode`: 'stream' | 'meeting' (padrão: 'meeting')
+- `role`: 'sender' | 'viewer' (padrão: 'sender')
+- `room`: string com código da sala
+- `name`: string com nome do usuário
+- `embed`: 'true' | 'false' (remove cabeçalhos externos para iframes)
+- `audio`: 'true' | 'false' (estado inicial do mic)
+- `video`: 'true' | 'false' (estado inicial da câmera)
+- `quality`: '360p' | '720p' | '1080p' (qualidade do streaming)
+
+## Iframe Obrigatório
+allow="camera; microphone; display-capture; autoplay"
+
+Para a documentação completa detalhada em formato texto, acesse /docs.txt

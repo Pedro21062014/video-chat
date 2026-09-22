@@ -9,17 +9,17 @@ import {
   Copy,
   Check,
   ExternalLink,
-  BookOpen,
-  Terminal,
-  Sparkles,
   Layers,
-  Monitor,
-  ShieldCheck,
   Radio,
   Sliders,
-  Play,
   RotateCcw,
+  FileText,
+  Download,
+  Terminal,
+  ShieldCheck,
+  Sparkles,
 } from 'lucide-react';
+import Link from 'next/link';
 
 interface IntegrationDocsModalProps {
   isOpen: boolean;
@@ -27,12 +27,14 @@ interface IntegrationDocsModalProps {
   currentRoomId?: string;
 }
 
+type TabKey = 'stream' | 'meeting' | 'params' | 'ai_txt' | 'free_architecture';
+
 export const IntegrationDocsModal: React.FC<IntegrationDocsModalProps> = ({
   isOpen,
   onClose,
   currentRoomId,
 }) => {
-  const [activeTab, setActiveTab] = useState<'stream' | 'meeting' | 'params' | 'free_architecture'>('stream');
+  const [activeTab, setActiveTab] = useState<TabKey>('stream');
   const [customCode, setCustomCode] = useState(currentRoomId || 'meu-codigo-123');
   const [copiedIndex, setCopiedIndex] = useState<string | null>(null);
 
@@ -61,214 +63,262 @@ export const IntegrationDocsModal: React.FC<IntegrationDocsModalProps> = ({
     setCustomCode(newCode);
   };
 
+  const RAW_AI_TXT = `# VIDEOMEET - DOCUMENTAÇÃO TÉCNICA E GUIA DE INTEGRAÇÃO (LLMS & DEVELOPERS)
+Protocolo: WebRTC P2P (Sem servidor de mídia pago / 100% Gratuito)
+Format: Plaintext Markdown
+
+## MODOS DE OPERAÇÃO
+1. Modo Transmissão (Stream): Pareamento por código entre Transmissor (Sender) e Receptor (Viewer).
+2. Modo Reunião (Meeting): Videoconferência completa em grupo com chat, reações, apresentação de tela e múltiplos participantes.
+
+## FORMATO DE URLS DE EMBED (IFRAME)
+- Transmissor de Câmera/Tela: ${baseUrl}/?mode=stream&role=sender&room={CODIGO}&embed=true
+- Receptor de Transmissão: ${baseUrl}/?mode=stream&role=viewer&room={CODIGO}&embed=true
+- Reunião Completa: ${baseUrl}/?room={CODIGO}&name={NOME}&embed=true
+
+## PARÂMETROS SUPORTADOS
+- mode: 'stream' | 'meeting' (padrão: 'meeting')
+- role: 'sender' | 'viewer' (apenas em mode=stream)
+- room: string (código da sala)
+- name: string (nome do participante)
+- embed: 'true' | 'false' (layout limpo sem header)
+- audio: 'true' | 'false' (microfone inicial)
+- video: 'true' | 'false' (câmera inicial)
+- quality: '360p' | '720p' | '1080p'
+
+## PERMISSÕES OBRIGATÓRIAS NO IFRAME
+allow="camera; microphone; display-capture; autoplay"`;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="relative w-full max-w-4xl max-h-[90vh] bg-[#202124] text-[#e8eaed] rounded-2xl border border-[#3c4043] shadow-2xl flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#3c4043]/60 bg-[#28292c]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+      <div className="relative w-full max-w-4xl max-h-[92vh] bg-[#17181c] text-[#e8eaed] rounded-2xl border border-[#2c3038] shadow-2xl flex flex-col overflow-hidden">
+        {/* Header - Minimalist & Modern */}
+        <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-[#2c3038] bg-[#1d1f24]">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#1a73e8]/20 border border-[#8ab4f8]/30 flex items-center justify-center text-[#8ab4f8]">
-              <Code2 className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-xl bg-[#272a32] border border-[#383d47] flex items-center justify-center text-[#8ab4f8]">
+              <Code2 className="w-4 h-4" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-semibold text-white tracking-tight">
-                  Integrações, Transmissão via Código & SDK
+                <h2 className="text-base font-semibold text-white tracking-tight">
+                  Guia de Integração & SDK
                 </h2>
-                <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-500/30 uppercase tracking-wider">
-                  100% Gratuito
+                <span className="bg-emerald-500/15 text-emerald-300 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-emerald-500/30">
+                  WebRTC P2P Grátis
                 </span>
               </div>
               <p className="text-xs text-[#9aa0a6]">
-                Transmita sua câmera ou incorpore chamadas de vídeo no seu próprio site ou app.
+                Transmita sua câmera ou incorpore chamadas de vídeo em qualquer site ou aplicativo.
               </p>
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-2 rounded-full hover:bg-[#3c4043] text-[#9aa0a6] hover:text-white transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/docs"
+              target="_blank"
+              className="hidden sm:flex items-center gap-1.5 text-xs text-[#8ab4f8] hover:text-[#aecbfa] bg-[#272a32] px-3 py-1.5 rounded-lg border border-[#383d47] transition-colors"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Ver em TXT (IA)</span>
+            </Link>
+
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg hover:bg-[#2c3038] text-[#9aa0a6] hover:text-white transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Live Code Tester Bar */}
-        <div className="px-6 py-3 bg-[#1e1f23] border-b border-[#3c4043]/40 flex flex-wrap items-center justify-between gap-3">
+        <div className="px-5 sm:px-6 py-2.5 bg-[#141518] border-b border-[#2c3038] flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-[#9aa0a6]">Código de Pareamento de Teste:</span>
-            <input
-              type="text"
-              value={customCode}
-              onChange={(e) => setCustomCode(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))}
-              placeholder="ex: cam-782-910"
-              className="bg-[#2d2f34] text-[#8ab4f8] font-mono font-bold text-xs px-3 py-1.5 rounded-lg border border-[#3c4043] focus:outline-none focus:border-[#8ab4f8] w-36 sm:w-44"
-            />
-            <button
-              onClick={generateNewCode}
-              title="Gerar outro código aleatório"
-              className="p-1.5 rounded-lg bg-[#28292c] hover:bg-[#3c4043] text-[#9aa0a6] hover:text-white border border-[#3c4043]/60 transition-colors"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-            </button>
+            <span className="text-[#9aa0a6] font-medium">Canal de Teste:</span>
+            <div className="flex items-center gap-1.5 bg-[#1f2127] px-2.5 py-1 rounded-lg border border-[#313540]">
+              <input
+                type="text"
+                value={customCode}
+                onChange={(e) => setCustomCode(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))}
+                placeholder="ex: cam-01"
+                className="bg-transparent text-[#8ab4f8] font-mono font-bold text-xs focus:outline-none w-32 sm:w-40"
+              />
+              <button
+                onClick={generateNewCode}
+                title="Gerar outro código aleatório"
+                className="text-[#9aa0a6] hover:text-white transition-colors cursor-pointer p-0.5"
+              >
+                <RotateCcw className="w-3 h-3" />
+              </button>
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
             <button
               onClick={() => window.open(senderUrl.replace('&embed=true', ''), '_blank')}
-              className="flex items-center gap-1.5 bg-[#1a73e8] hover:bg-[#1b66c9] text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors shadow-sm"
+              className="flex items-center gap-1.5 bg-[#252830] hover:bg-[#30343f] text-white text-xs px-3 py-1.5 rounded-lg border border-[#383d47] transition-colors cursor-pointer"
             >
-              <Video className="w-3.5 h-3.5" />
-              <span>Abrir Transmissor</span>
-              <ExternalLink className="w-3 h-3 opacity-70" />
+              <Video className="w-3.5 h-3.5 text-[#8ab4f8]" />
+              <span>Testar Transmissor</span>
+              <ExternalLink className="w-3 h-3 text-[#9aa0a6]" />
             </button>
 
             <button
               onClick={() => window.open(viewerUrl.replace('&embed=true', ''), '_blank')}
-              className="flex items-center gap-1.5 bg-[#28292c] hover:bg-[#3c4043] text-[#8ab4f8] text-xs font-medium px-3 py-1.5 rounded-lg border border-[#3c4043] transition-colors"
+              className="flex items-center gap-1.5 bg-[#252830] hover:bg-[#30343f] text-white text-xs px-3 py-1.5 rounded-lg border border-[#383d47] transition-colors cursor-pointer"
             >
-              <Tv className="w-3.5 h-3.5" />
-              <span>Abrir Receptor</span>
-              <ExternalLink className="w-3 h-3 opacity-70" />
+              <Tv className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Testar Receptor</span>
+              <ExternalLink className="w-3 h-3 text-[#9aa0a6]" />
             </button>
           </div>
         </div>
 
-        {/* Navigation Tabs */}
-        <div className="flex border-b border-[#3c4043]/60 bg-[#28292c]/50 px-6 gap-1 overflow-x-auto">
+        {/* Minimalist Tabs Header */}
+        <div className="flex border-b border-[#2c3038] bg-[#191a1f] px-5 sm:px-6 gap-1.5 overflow-x-auto">
           <button
             onClick={() => setActiveTab('stream')}
-            className={`flex items-center gap-2 px-4 py-3 text-xs sm:text-sm font-medium border-b-2 transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium rounded-t-lg transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'stream'
-                ? 'border-[#8ab4f8] text-[#8ab4f8]'
-                : 'border-transparent text-[#9aa0a6] hover:text-[#e8eaed]'
+                ? 'bg-[#252830] text-[#8ab4f8] border-b-2 border-[#8ab4f8]'
+                : 'text-[#9aa0a6] hover:text-[#e8eaed]'
             }`}
           >
-            <Radio className="w-4 h-4" />
-            <span>1. Só Transmissão & Pareamento</span>
+            <Radio className="w-3.5 h-3.5" />
+            <span>1. Só Transmissão (Pareamento)</span>
           </button>
 
           <button
             onClick={() => setActiveTab('meeting')}
-            className={`flex items-center gap-2 px-4 py-3 text-xs sm:text-sm font-medium border-b-2 transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium rounded-t-lg transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'meeting'
-                ? 'border-[#8ab4f8] text-[#8ab4f8]'
-                : 'border-transparent text-[#9aa0a6] hover:text-[#e8eaed]'
+                ? 'bg-[#252830] text-[#8ab4f8] border-b-2 border-[#8ab4f8]'
+                : 'text-[#9aa0a6] hover:text-[#e8eaed]'
             }`}
           >
-            <Layers className="w-4 h-4" />
-            <span>2. Chamada Completa (Embed)</span>
+            <Layers className="w-3.5 h-3.5" />
+            <span>2. Reunião Completa</span>
           </button>
 
           <button
             onClick={() => setActiveTab('params')}
-            className={`flex items-center gap-2 px-4 py-3 text-xs sm:text-sm font-medium border-b-2 transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium rounded-t-lg transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'params'
-                ? 'border-[#8ab4f8] text-[#8ab4f8]'
-                : 'border-transparent text-[#9aa0a6] hover:text-[#e8eaed]'
+                ? 'bg-[#252830] text-[#8ab4f8] border-b-2 border-[#8ab4f8]'
+                : 'text-[#9aa0a6] hover:text-[#e8eaed]'
             }`}
           >
-            <Sliders className="w-4 h-4" />
-            <span>3. Parâmetros de URL & API REST</span>
+            <Sliders className="w-3.5 h-3.5" />
+            <span>3. Parâmetros de URL</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('ai_txt')}
+            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium rounded-t-lg transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === 'ai_txt'
+                ? 'bg-[#252830] text-purple-300 border-b-2 border-purple-400'
+                : 'text-[#9aa0a6] hover:text-[#e8eaed]'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5 text-purple-400" />
+            <span>4. TXT para IA (llms.txt)</span>
           </button>
 
           <button
             onClick={() => setActiveTab('free_architecture')}
-            className={`flex items-center gap-2 px-4 py-3 text-xs sm:text-sm font-medium border-b-2 transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium rounded-t-lg transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'free_architecture'
-                ? 'border-[#8ab4f8] text-[#8ab4f8]'
-                : 'border-transparent text-[#9aa0a6] hover:text-[#e8eaed]'
+                ? 'bg-[#252830] text-emerald-300 border-b-2 border-emerald-400'
+                : 'text-[#9aa0a6] hover:text-[#e8eaed]'
             }`}
           >
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>4. Por que é 100% Gratuito?</span>
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span>5. Por que é Grátis?</span>
           </button>
         </div>
 
-        {/* Tab Contents */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {/* TAB 1: SÓ TRANSMISSÃO / PAREAMENTO */}
+        {/* Tab Content Body */}
+        <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5 text-xs">
+          {/* TAB 1: SÓ TRANSMISSÃO VIA CÓDIGO */}
           {activeTab === 'stream' && (
-            <div className="space-y-6 animate-in fade-in duration-150">
-              <div className="bg-[#1e1f23] p-4 rounded-xl border border-[#3c4043]/60">
-                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                  <Radio className="w-4 h-4 text-[#8ab4f8]" />
-                  Como funciona o Modo de Transmissão por Pareamento
-                </h3>
-                <p className="text-xs text-[#9aa0a6] mt-1.5 leading-relaxed">
-                  Permite transmitir apenas a câmera ou a tela de um dispositivo (ex: smartphone, webcam ou PC) para outro lugar (ex: outro monitor, site externo, sistema de segurança, OBS Studio ou dashboard) usando apenas o mesmo código de pareamento.
+            <div className="space-y-5">
+              <div className="bg-[#1e2026] p-4 rounded-xl border border-[#2d313a]">
+                <p className="text-[#9aa0a6] leading-relaxed">
+                  Permite transmitir apenas a câmera ou tela de um dispositivo (ex: smartphone, webcam ou PC) para outro lugar (dashboard, outro monitor, site externo ou OBS Studio) usando apenas o código de pareamento.
                 </p>
               </div>
 
-              {/* Snippet 1: Iframe HTML */}
+              {/* Snippet Iframe */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-[#8ab4f8] flex items-center gap-1.5">
-                    <Terminal className="w-3.5 h-3.5" />
-                    Opção A: Iframe HTML (Visualizador / Receptor)
+                  <span className="font-semibold text-white flex items-center gap-1.5">
+                    <Terminal className="w-3.5 h-3.5 text-[#8ab4f8]" />
+                    Opção A: Iframe HTML (Receptor / Assistir)
                   </span>
                   <button
                     onClick={() =>
                       copyToClipboard(
-                        `<iframe\n  src="${viewerUrl}"\n  width="100%"\n  height="500"\n  allow="camera; microphone; display-capture; autoplay; fullscreen"\n  allowfullscreen\n  style="border: none; border-radius: 12px; background: #121316;">\n</iframe>`,
+                        `<iframe\n  src="${viewerUrl}"\n  width="100%"\n  height="480"\n  allow="camera; microphone; display-capture; autoplay"\n  allowfullscreen\n  style="border: none; border-radius: 12px; background: #111;">\n</iframe>`,
                         'iframe_stream'
                       )
                     }
-                    className="flex items-center gap-1 text-xs text-[#9aa0a6] hover:text-white transition-colors"
+                    className="flex items-center gap-1 text-[11px] text-[#9aa0a6] hover:text-white bg-[#252830] px-2.5 py-1 rounded border border-[#333742] transition-colors cursor-pointer"
                   >
-                    {copiedIndex === 'iframe_stream' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedIndex === 'iframe_stream' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                     <span>{copiedIndex === 'iframe_stream' ? 'Copiado!' : 'Copiar Iframe'}</span>
                   </button>
                 </div>
 
-                <div className="relative bg-[#131417] p-3.5 rounded-xl border border-[#3c4043]/50 font-mono text-xs text-[#e8eaed] overflow-x-auto">
-                  <pre className="text-[11px] leading-relaxed">
+                <div className="bg-[#121316] p-3.5 rounded-xl border border-[#2c3038] font-mono text-[11px] text-[#e8eaed] overflow-x-auto">
+                  <pre className="leading-relaxed">
 {`<iframe
   src="${viewerUrl}"
   width="100%"
-  height="500"
-  allow="camera; microphone; display-capture; autoplay; fullscreen"
+  height="480"
+  allow="camera; microphone; display-capture; autoplay"
   allowfullscreen
-  style="border: none; border-radius: 12px; background: #121316;">
+  style="border: none; border-radius: 12px; background: #111;">
 </iframe>`}
                   </pre>
                 </div>
               </div>
 
-              {/* Snippet 2: JavaScript SDK */}
+              {/* Snippet SDK */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-[#8ab4f8] flex items-center gap-1.5">
-                    <Code2 className="w-3.5 h-3.5" />
-                    Opção B: JavaScript SDK (Zero Dependências)
+                  <span className="font-semibold text-white flex items-center gap-1.5">
+                    <Code2 className="w-3.5 h-3.5 text-[#8ab4f8]" />
+                    Opção B: JavaScript SDK (`videomeet-sdk.js`)
                   </span>
                   <button
                     onClick={() =>
                       copyToClipboard(
-                        `<!-- 1. Inclua o SDK no seu site -->\n<script src="${baseUrl}/videomeet-sdk.js"></script>\n\n<!-- 2. Container onde o vídeo será exibido -->\n<div id="camera-stream" style="width: 100%; height: 450px;"></div>\n\n<script>\n  // Criar o receptor pareado com o código\n  const viewer = VideoMeet.createViewer({\n    container: '#camera-stream',\n    roomCode: '${cleanCode}',\n    baseUrl: '${baseUrl}'\n  });\n</script>`,
+                        `<!-- Inclua o SDK no seu site -->\n<script src="${baseUrl}/videomeet-sdk.js"></script>\n\n<div id="camera-stream" style="width: 100%; height: 450px;"></div>\n\n<script>\n  // Gera e inicializa o receptor pareado instantaneamente\n  VideoMeet.embed({\n    container: '#camera-stream',\n    mode: 'stream',\n    role: 'viewer',\n    room: '${cleanCode}',\n    baseUrl: '${baseUrl}'\n  });\n</script>`,
                         'js_sdk'
                       )
                     }
-                    className="flex items-center gap-1 text-xs text-[#9aa0a6] hover:text-white transition-colors"
+                    className="flex items-center gap-1 text-[11px] text-[#9aa0a6] hover:text-white bg-[#252830] px-2.5 py-1 rounded border border-[#333742] transition-colors cursor-pointer"
                   >
-                    {copiedIndex === 'js_sdk' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedIndex === 'js_sdk' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                     <span>{copiedIndex === 'js_sdk' ? 'Copiado!' : 'Copiar SDK'}</span>
                   </button>
                 </div>
 
-                <div className="relative bg-[#131417] p-3.5 rounded-xl border border-[#3c4043]/50 font-mono text-xs text-[#e8eaed] overflow-x-auto">
-                  <pre className="text-[11px] leading-relaxed">
+                <div className="bg-[#121316] p-3.5 rounded-xl border border-[#2c3038] font-mono text-[11px] text-[#e8eaed] overflow-x-auto">
+                  <pre className="leading-relaxed">
 {`<!-- 1. Inclua o SDK no seu site -->
 <script src="${baseUrl}/videomeet-sdk.js"></script>
 
-<!-- 2. Container onde o vídeo será exibido -->
+<!-- 2. Container HTML onde o vídeo será exibido -->
 <div id="camera-stream" style="width: 100%; height: 450px;"></div>
 
 <script>
-  // Criar o receptor pareado com o código
-  const viewer = VideoMeet.createViewer({
+  VideoMeet.embed({
     container: '#camera-stream',
-    roomCode: '${cleanCode}',
+    mode: 'stream',
+    role: 'viewer',
+    room: '${cleanCode}',
     baseUrl: '${baseUrl}'
   });
 </script>`}
@@ -276,103 +326,97 @@ export const IntegrationDocsModal: React.FC<IntegrationDocsModalProps> = ({
                 </div>
               </div>
 
-              {/* Snippet 3: OBS Studio / Live Stream */}
+              {/* Snippet OBS Studio */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-[#8ab4f8] flex items-center gap-1.5">
-                    <Monitor className="w-3.5 h-3.5" />
+                  <span className="font-semibold text-white flex items-center gap-1.5">
+                    <Tv className="w-3.5 h-3.5 text-emerald-400" />
                     Opção C: OBS Studio / Streamlabs (Browser Source)
                   </span>
                   <button
                     onClick={() => copyToClipboard(viewerUrl, 'obs_url')}
-                    className="flex items-center gap-1 text-xs text-[#9aa0a6] hover:text-white transition-colors"
+                    className="flex items-center gap-1 text-[11px] text-[#9aa0a6] hover:text-white bg-[#252830] px-2.5 py-1 rounded border border-[#333742] transition-colors cursor-pointer"
                   >
-                    {copiedIndex === 'obs_url' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedIndex === 'obs_url' ? 'Copiado!' : 'Copiar URL do OBS'}</span>
+                    {copiedIndex === 'obs_url' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedIndex === 'obs_url' ? 'Copiado!' : 'Copiar URL'}</span>
                   </button>
                 </div>
 
-                <div className="bg-[#131417] p-3.5 rounded-xl border border-[#3c4043]/50 font-mono text-xs text-emerald-300 break-all">
+                <div className="bg-[#121316] p-3 rounded-xl border border-[#2c3038] font-mono text-emerald-300 break-all">
                   {viewerUrl}
                 </div>
                 <p className="text-[11px] text-[#9aa0a6]">
-                  No OBS Studio: Adicione uma fonte <strong>Navegador (Browser Source)</strong>, cole a URL acima e defina a resolução para 1920x1080.
+                  No OBS Studio: Adicione a fonte <strong>Navegador (Browser Source)</strong> com 1920x1080.
                 </p>
               </div>
             </div>
           )}
 
-          {/* TAB 2: CHAMADA COMPLETA (EMBED) */}
+          {/* TAB 2: REUNIÃO COMPLETA */}
           {activeTab === 'meeting' && (
-            <div className="space-y-6 animate-in fade-in duration-150">
-              <div className="bg-[#1e1f23] p-4 rounded-xl border border-[#3c4043]/60">
-                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-[#8ab4f8]" />
-                  Incorporar Reunião Completa no seu Site ou Aplicativo
-                </h3>
-                <p className="text-xs text-[#9aa0a6] mt-1.5 leading-relaxed">
-                  Adicione uma sala de videoconferência completa com áudio bidirecional, chat, reações, compartilhamento de tela e layout adaptativo em qualquer página web.
+            <div className="space-y-5">
+              <div className="bg-[#1e2026] p-4 rounded-xl border border-[#2d313a]">
+                <p className="text-[#9aa0a6] leading-relaxed">
+                  Adicione uma sala de videoconferência completa com áudio bidirecional, chat, reações de emoji, apresentação de tela e layout adaptativo em qualquer página.
                 </p>
               </div>
 
-              {/* Snippet Iframe Reunião */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-[#8ab4f8]">Código Iframe para Reunião Completa:</span>
+                  <span className="font-semibold text-white">Iframe de Reunião:</span>
                   <button
                     onClick={() =>
                       copyToClipboard(
-                        `<iframe\n  src="${meetingUrl}"\n  width="100%"\n  height="650"\n  allow="camera; microphone; display-capture; autoplay; fullscreen; clipboard-write"\n  allowfullscreen\n  style="border: none; border-radius: 16px; background: #121316;">\n</iframe>`,
+                        `<iframe\n  src="${meetingUrl}"\n  width="100%"\n  height="600"\n  allow="camera; microphone; display-capture; autoplay"\n  allowfullscreen\n  style="border: none; border-radius: 16px; background: #111;">\n</iframe>`,
                         'iframe_meeting'
                       )
                     }
-                    className="flex items-center gap-1 text-xs text-[#9aa0a6] hover:text-white transition-colors"
+                    className="flex items-center gap-1 text-[11px] text-[#9aa0a6] hover:text-white bg-[#252830] px-2.5 py-1 rounded border border-[#333742] transition-colors cursor-pointer"
                   >
-                    {copiedIndex === 'iframe_meeting' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedIndex === 'iframe_meeting' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                     <span>{copiedIndex === 'iframe_meeting' ? 'Copiado!' : 'Copiar Iframe'}</span>
                   </button>
                 </div>
 
-                <div className="relative bg-[#131417] p-3.5 rounded-xl border border-[#3c4043]/50 font-mono text-xs text-[#e8eaed] overflow-x-auto">
-                  <pre className="text-[11px] leading-relaxed">
+                <div className="bg-[#121316] p-3.5 rounded-xl border border-[#2c3038] font-mono text-[11px] text-[#e8eaed] overflow-x-auto">
+                  <pre className="leading-relaxed">
 {`<iframe
   src="${meetingUrl}"
   width="100%"
-  height="650"
-  allow="camera; microphone; display-capture; autoplay; fullscreen; clipboard-write"
+  height="600"
+  allow="camera; microphone; display-capture; autoplay"
   allowfullscreen
-  style="border: none; border-radius: 16px; background: #121316;">
+  style="border: none; border-radius: 16px; background: #111;">
 </iframe>`}
                   </pre>
                 </div>
               </div>
 
-              {/* React Component Snippet */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-[#8ab4f8]">Exemplo em React / Next.js:</span>
+                  <span className="font-semibold text-white">Componente React / Next.js:</span>
                   <button
                     onClick={() =>
                       copyToClipboard(
-                        `export function VideoCallWidget({ roomCode }: { roomCode: string }) {\n  return (\n    <iframe\n      src={\`${baseUrl}/?room=\${roomCode}&embed=true\`}\n      className="w-full h-[600px] rounded-2xl border-none bg-[#121316]"\n      allow="camera; microphone; display-capture; autoplay; fullscreen"\n      allowFullScreen\n    />\n  );\n}`,
-                        'react_snippet'
+                        `export function VideoCallWidget({ roomCode }: { roomCode: string }) {\n  return (\n    <iframe\n      src={\`${baseUrl}/?room=\${encodeURIComponent(roomCode)}&embed=true\`}\n      className="w-full h-[600px] rounded-2xl border-0 bg-[#111]"\n      allow="camera; microphone; display-capture; autoplay"\n      allowFullScreen\n    />\n  );\n}`,
+                        'react_meeting'
                       )
                     }
-                    className="flex items-center gap-1 text-xs text-[#9aa0a6] hover:text-white transition-colors"
+                    className="flex items-center gap-1 text-[11px] text-[#9aa0a6] hover:text-white bg-[#252830] px-2.5 py-1 rounded border border-[#333742] transition-colors cursor-pointer"
                   >
-                    {copiedIndex === 'react_snippet' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedIndex === 'react_snippet' ? 'Copiado!' : 'Copiar Componente'}</span>
+                    {copiedIndex === 'react_meeting' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedIndex === 'react_meeting' ? 'Copiado!' : 'Copiar React'}</span>
                   </button>
                 </div>
 
-                <div className="relative bg-[#131417] p-3.5 rounded-xl border border-[#3c4043]/50 font-mono text-xs text-[#e8eaed] overflow-x-auto">
-                  <pre className="text-[11px] leading-relaxed">
+                <div className="bg-[#121316] p-3.5 rounded-xl border border-[#2c3038] font-mono text-[11px] text-[#e8eaed] overflow-x-auto">
+                  <pre className="leading-relaxed">
 {`export function VideoCallWidget({ roomCode }: { roomCode: string }) {
   return (
     <iframe
-      src={\`${baseUrl}/?room=\${roomCode}&embed=true\`}
-      className="w-full h-[600px] rounded-2xl border-none bg-[#121316]"
-      allow="camera; microphone; display-capture; autoplay; fullscreen"
+      src={\`${baseUrl}/?room=\${encodeURIComponent(roomCode)}&embed=true\`}
+      className="w-full h-[600px] rounded-2xl border-0 bg-[#111]"
+      allow="camera; microphone; display-capture; autoplay"
       allowFullScreen
     />
   );
@@ -383,114 +427,141 @@ export const IntegrationDocsModal: React.FC<IntegrationDocsModalProps> = ({
             </div>
           )}
 
-          {/* TAB 3: PARÂMETROS DE URL & API REST */}
+          {/* TAB 3: PARÂMETROS DE URL */}
           {activeTab === 'params' && (
-            <div className="space-y-6 animate-in fade-in duration-150">
-              <div className="bg-[#1e1f23] p-4 rounded-xl border border-[#3c4043]/60">
-                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                  <Sliders className="w-4 h-4 text-[#8ab4f8]" />
-                  Tabela de Parâmetros de URL
-                </h3>
-                <p className="text-xs text-[#9aa0a6] mt-1.5 leading-relaxed">
-                  Você pode personalizar o comportamento de inicialização passando parâmetros na URL:
+            <div className="space-y-4">
+              <div className="bg-[#1e2026] p-4 rounded-xl border border-[#2d313a]">
+                <p className="text-[#9aa0a6] leading-relaxed">
+                  Personalize a inicialização configurando os parâmetros na query string da URL:
                 </p>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs text-left border-collapse">
+              <div className="overflow-x-auto rounded-xl border border-[#2c3038]">
+                <table className="w-full text-left border-collapse">
                   <thead>
-                    <tr className="border-b border-[#3c4043] text-[#9aa0a6] bg-[#28292c]">
+                    <tr className="bg-[#20232a] text-[#9aa0a6] border-b border-[#2c3038] text-[11px]">
                       <th className="py-2.5 px-3 font-semibold">Parâmetro</th>
-                      <th className="py-2.5 px-3 font-semibold">Valores</th>
+                      <th className="py-2.5 px-3 font-semibold">Valores Possíveis</th>
                       <th className="py-2.5 px-3 font-semibold">Descrição</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#3c4043]/50 font-mono text-[11px]">
-                    <tr>
+                  <tbody className="divide-y divide-[#2c3038] font-mono text-[11px]">
+                    <tr className="hover:bg-[#1a1b20]">
                       <td className="py-2.5 px-3 text-[#8ab4f8] font-bold">room</td>
-                      <td className="py-2.5 px-3 text-white">string (ex: abc-defg-hij)</td>
-                      <td className="py-2.5 px-3 text-[#9aa0a6] font-sans">Código da sala ou pareamento</td>
+                      <td className="py-2.5 px-3 text-white">string (ex: sala-102)</td>
+                      <td className="py-2.5 px-3 text-[#9aa0a6] font-sans">Código do canal de pareamento</td>
                     </tr>
-                    <tr>
+                    <tr className="hover:bg-[#1a1b20]">
                       <td className="py-2.5 px-3 text-[#8ab4f8] font-bold">mode</td>
                       <td className="py-2.5 px-3 text-white">stream | meeting</td>
-                      <td className="py-2.5 px-3 text-[#9aa0a6] font-sans">Define se é só transmissão ou reunião</td>
+                      <td className="py-2.5 px-3 text-[#9aa0a6] font-sans">Só transmissão ou reunião completa</td>
                     </tr>
-                    <tr>
+                    <tr className="hover:bg-[#1a1b20]">
                       <td className="py-2.5 px-3 text-[#8ab4f8] font-bold">role</td>
                       <td className="py-2.5 px-3 text-white">sender | viewer</td>
-                      <td className="py-2.5 px-3 text-[#9aa0a6] font-sans">Para modo stream: se é transmissor ou receptor</td>
+                      <td className="py-2.5 px-3 text-[#9aa0a6] font-sans">Se é transmissor ou receptor (no modo stream)</td>
                     </tr>
-                    <tr>
+                    <tr className="hover:bg-[#1a1b20]">
                       <td className="py-2.5 px-3 text-[#8ab4f8] font-bold">embed</td>
                       <td className="py-2.5 px-3 text-white">true | false</td>
-                      <td className="py-2.5 px-3 text-[#9aa0a6] font-sans">Oculta cabeçalhos externos para encaixar perfeitamente em iframes</td>
+                      <td className="py-2.5 px-3 text-[#9aa0a6] font-sans">Oculta barras externas para iframes</td>
                     </tr>
-                    <tr>
+                    <tr className="hover:bg-[#1a1b20]">
                       <td className="py-2.5 px-3 text-[#8ab4f8] font-bold">audio</td>
-                      <td className="py-2.5 px-3 text-white">1 | 0</td>
-                      <td className="py-2.5 px-3 text-[#9aa0a6] font-sans">Microfone inicial (1 = ligado, 0 = mutado)</td>
+                      <td className="py-2.5 px-3 text-white">true | false</td>
+                      <td className="py-2.5 px-3 text-[#9aa0a6] font-sans">Microfone inicial (true = ligado, false = mudo)</td>
                     </tr>
-                    <tr>
+                    <tr className="hover:bg-[#1a1b20]">
                       <td className="py-2.5 px-3 text-[#8ab4f8] font-bold">video</td>
-                      <td className="py-2.5 px-3 text-white">1 | 0</td>
-                      <td className="py-2.5 px-3 text-[#9aa0a6] font-sans">Câmera inicial (1 = ligada, 0 = desligada)</td>
+                      <td className="py-2.5 px-3 text-white">true | false</td>
+                      <td className="py-2.5 px-3 text-[#9aa0a6] font-sans">Câmera inicial (true = ligada, false = desligada)</td>
                     </tr>
-                    <tr>
+                    <tr className="hover:bg-[#1a1b20]">
                       <td className="py-2.5 px-3 text-[#8ab4f8] font-bold">quality</td>
-                      <td className="py-2.5 px-3 text-white">1080p | 720p | 480p</td>
-                      <td className="py-2.5 px-3 text-[#9aa0a6] font-sans">Resolução alvo padrão de transmissão</td>
+                      <td className="py-2.5 px-3 text-white">360p | 720p | 1080p</td>
+                      <td className="py-2.5 px-3 text-[#9aa0a6] font-sans">Resolução alvo da transmissão</td>
                     </tr>
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
 
-              {/* SDK Session Generator Helper */}
-              <div className="space-y-2">
-                <span className="text-xs font-semibold text-[#8ab4f8]">Gerador Automático de Sessão via SDK:</span>
-                <div className="bg-[#131417] p-3.5 rounded-xl border border-[#3c4043]/50 font-mono text-xs text-[#e8eaed] space-y-2">
-                  <div className="text-emerald-400 font-bold">VideoMeet.createSession()</div>
-                  <p className="text-[11px] text-[#9aa0a6] font-sans">
-                    Retorna links prontos e códigos de pareamento instantaneamente no cliente para transmissor, receptor ou embed, sem precisar de backend adicional.
+          {/* TAB 4: TXT PURO PARA IA (LLMS.TXT) */}
+          {activeTab === 'ai_txt' && (
+            <div className="space-y-4">
+              <div className="bg-[#1e1c26] p-4 rounded-xl border border-purple-500/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div>
+                  <div className="text-purple-300 font-semibold flex items-center gap-1.5">
+                    <FileText className="w-4 h-4" />
+                    <span>Documentação em Formato Texto Puro para Agentes & IAs</span>
+                  </div>
+                  <p className="text-[#9aa0a6] text-[11px] mt-1">
+                    Pronto para copiar como contexto para <strong>ChatGPT, Claude, Gemini ou Cursor</strong>.
                   </p>
                 </div>
+
+                <div className="flex items-center gap-2">
+                  <a
+                    href="/docs.txt"
+                    target="_blank"
+                    className="flex items-center gap-1.5 bg-[#2a2636] hover:bg-[#373248] text-purple-200 px-3 py-1.5 rounded-lg border border-purple-500/30 text-xs transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Abrir /docs.txt</span>
+                  </a>
+
+                  <button
+                    onClick={() => copyToClipboard(RAW_AI_TXT, 'raw_ai_txt')}
+                    className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 text-white font-semibold px-3 py-1.5 rounded-lg text-xs transition-colors shadow cursor-pointer"
+                  >
+                    {copiedIndex === 'raw_ai_txt' ? <Check className="w-3.5 h-3.5 text-emerald-200" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedIndex === 'raw_ai_txt' ? 'Copiado!' : 'Copiar TXT Completo'}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-[#121316] p-4 rounded-xl border border-[#2c3038] font-mono text-[11px] text-[#dcdfe4] overflow-x-auto max-h-64">
+                <pre className="whitespace-pre-wrap leading-relaxed">
+                  {RAW_AI_TXT}
+                </pre>
               </div>
             </div>
           )}
 
-          {/* TAB 4: ARQUITETURA GRATUITA */}
+          {/* TAB 5: ARQUITETURA GRATUITA */}
           {activeTab === 'free_architecture' && (
-            <div className="space-y-6 animate-in fade-in duration-150">
-              <div className="bg-emerald-950/30 p-5 rounded-2xl border border-emerald-500/30 space-y-3">
-                <div className="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
-                  <ShieldCheck className="w-5 h-5" />
-                  <span>Por que este serviço é 100% Gratuito e Não Gera Custos?</span>
+            <div className="space-y-4">
+              <div className="bg-emerald-950/25 p-4 rounded-xl border border-emerald-500/25 space-y-2">
+                <div className="flex items-center gap-2 text-emerald-400 font-semibold">
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>Por que o VideoMeet é 100% Gratuito?</span>
                 </div>
-                <p className="text-xs text-emerald-200/80 leading-relaxed">
-                  Diferente de serviços convencionais que cobram por minuto (Twilio, Agora, Zoom SDK), nossa aplicação opera através de <strong>WebRTC Peer-to-Peer (P2P)</strong>:
+                <p className="text-emerald-200/80 leading-relaxed text-[11px]">
+                  Ao contrário de Twilio ou Zoom que cobram por minuto e usam servidores centrais caros, nossa arquitetura opera em <strong>WebRTC Peer-to-Peer direto</strong>:
                 </p>
+              </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-                  <div className="bg-[#1e1f23]/90 p-3 rounded-xl border border-[#3c4043]/50">
-                    <div className="text-white font-medium text-xs mb-1">1. Conexão Direta (P2P)</div>
-                    <p className="text-[11px] text-[#9aa0a6]">
-                      O fluxo de vídeo vai diretamente do dispositivo A para o dispositivo B sem passar por servidores de mídia caros.
-                    </p>
-                  </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="bg-[#1e2026] p-3.5 rounded-xl border border-[#2d313a]">
+                  <div className="text-white font-semibold text-xs mb-1">1. Vídeo Direto (P2P)</div>
+                  <p className="text-[11px] text-[#9aa0a6]">
+                    Os dados de áudio e vídeo trafegam diretamente entre os navegadores, sem servidor intermediário.
+                  </p>
+                </div>
 
-                  <div className="bg-[#1e1f23]/90 p-3 rounded-xl border border-[#3c4043]/50">
-                    <div className="text-white font-medium text-xs mb-1">2. Zero Custo de Mídia</div>
-                    <p className="text-[11px] text-[#9aa0a6]">
-                      Apenas o sinal inicial (SDP/ICE) é trocado via Firestore no plano gratuito, reduzindo o tráfego do servidor a quase zero.
-                    </p>
-                  </div>
+                <div className="bg-[#1e2026] p-3.5 rounded-xl border border-[#2d313a]">
+                  <div className="text-white font-semibold text-xs mb-1">2. Zero Custo de Tráfego</div>
+                  <p className="text-[11px] text-[#9aa0a6]">
+                    Apenas o sinal inicial de conexão é trocado via Firestore no plano gratuito.
+                  </p>
+                </div>
 
-                  <div className="bg-[#1e1f23]/90 p-3 rounded-xl border border-[#3c4043]/50">
-                    <div className="text-white font-medium text-xs mb-1">3. Sem Limites de Tempo</div>
-                    <p className="text-[11px] text-[#9aa0a6]">
-                      As transmissões e chamadas não possuem limite de 40 minutos. Podem ficar ativas continuamente.
-                    </p>
-                  </div>
+                <div className="bg-[#1e2026] p-3.5 rounded-xl border border-[#2d313a]">
+                  <div className="text-white font-semibold text-xs mb-1">3. Sem Limite de Tempo</div>
+                  <p className="text-[11px] text-[#9aa0a6]">
+                    Transmissões e chamadas podem rodar continuamente sem cortes aos 40 minutos.
+                  </p>
                 </div>
               </div>
             </div>
@@ -498,13 +569,11 @@ export const IntegrationDocsModal: React.FC<IntegrationDocsModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 bg-[#28292c] border-t border-[#3c4043]/60 flex items-center justify-between">
-          <div className="text-xs text-[#9aa0a6]">
-            Precisa de ajuda? O SDK é aberto e funciona em qualquer navegador moderno.
-          </div>
+        <div className="px-5 sm:px-6 py-3 bg-[#1d1f24] border-t border-[#2c3038] flex items-center justify-between text-xs text-[#9aa0a6]">
+          <span>SDK aberto e compatível com todos os navegadores modernos.</span>
           <button
             onClick={onClose}
-            className="bg-[#1a73e8] hover:bg-[#1b66c9] text-white px-5 py-2 rounded-xl text-xs font-semibold transition-colors"
+            className="bg-[#252830] hover:bg-[#30343f] text-white px-4 py-1.5 rounded-lg border border-[#383d47] transition-colors cursor-pointer font-medium"
           >
             Fechar
           </button>
