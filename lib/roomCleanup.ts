@@ -69,9 +69,7 @@ export async function purgeRoomData(roomId: string): Promise<void> {
   if (!roomId) return;
 
   try {
-    await clearEphemeralRoomData(roomId);
-
-    // Preserve room document metadata while updating status to ended
+    // 1. Immediately mark room document status as 'ended' so all active participants get notified instantly
     const roomRef = doc(db, 'rooms', roomId);
     await setDoc(
       roomRef,
@@ -84,7 +82,10 @@ export async function purgeRoomData(roomId: string): Promise<void> {
       { merge: true }
     );
 
-    console.log(`[RoomCleanup] Successfully cleared all ephemeral data and ended room ${roomId}`);
+    // 2. Clear ephemeral room data (signals, messages, reactions, participants)
+    await clearEphemeralRoomData(roomId);
+
+    console.log(`[RoomCleanup] Successfully ended room ${roomId} and cleared all ephemeral data`);
   } catch (err) {
     console.error(`[RoomCleanup] Failed to purge room ${roomId}:`, err);
   }

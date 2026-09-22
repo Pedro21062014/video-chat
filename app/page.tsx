@@ -676,14 +676,25 @@ export default function MeetingApp() {
 
     const targetRoomId = roomId;
 
-    try {
-      if (targetRoomId) {
-        await purgeRoomData(targetRoomId);
-      }
-    } catch {
-      // ignore
+    if (targetRoomId) {
+      // 1. Instantly set status: 'ended' in Firestore (< 50ms) to trigger all clients immediately
+      const roomRef = doc(db, 'rooms', targetRoomId);
+      setDoc(
+        roomRef,
+        {
+          status: 'ended',
+          endedAt: Date.now(),
+          lastActive: Date.now(),
+          clearedAt: Date.now(),
+        },
+        { merge: true }
+      ).catch(() => {});
+
+      // 2. Asynchronously purge room subcollections in the background
+      purgeRoomData(targetRoomId).catch(() => {});
     }
 
+    // 3. Immediately shut down local call session & return to lobby on the spot
     await handleLeaveCall();
     setNotificationMessage('Você encerrou a reunião para todos os participantes.');
   };
@@ -825,12 +836,9 @@ export default function MeetingApp() {
       if (snapshot.exists()) {
         const data = snapshot.data();
         if (data.status === 'ended') {
-          // Only auto-end if endedAt was explicitly set and occurred after this meeting session started
-          if (data.endedAt && data.endedAt > meetingStartTimeRef.current) {
-            sound.playHangup();
-            setNotificationMessage('A reunião foi encerrada pelo organizador.');
-            handleLeaveCallRef.current();
-          }
+          sound.playHangup();
+          setNotificationMessage('A reunião foi encerrada pelo organizador.');
+          handleLeaveCallRef.current();
         } else if (data.hostId === currentUserId) {
           setIsHost(true);
         }
