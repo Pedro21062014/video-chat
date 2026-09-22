@@ -19,7 +19,6 @@ import {
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
-import Link from 'next/link';
 
 interface IntegrationDocsModalProps {
   isOpen: boolean;
@@ -114,14 +113,15 @@ allow="camera; microphone; display-capture; autoplay"`;
           </div>
 
           <div className="flex items-center gap-2">
-            <Link
-              href="/docs"
+            <a
+              href="/docs.txt"
               target="_blank"
+              rel="noopener noreferrer"
               className="hidden sm:flex items-center gap-1.5 text-xs text-[#8ab4f8] hover:text-[#aecbfa] bg-[#272a32] px-3 py-1.5 rounded-lg border border-[#383d47] transition-colors"
             >
               <FileText className="w-3.5 h-3.5" />
-              <span>Ver em TXT (IA)</span>
-            </Link>
+              <span>Abrir TXT para IA (/docs.txt)</span>
+            </a>
 
             <button
               onClick={onClose}
