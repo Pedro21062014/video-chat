@@ -7,8 +7,8 @@ import {
   Video,
   VideoOff,
   SwitchCamera,
-  ScreenShare,
-  ScreenShareOff,
+  MonitorUp,
+  MonitorOff,
   PhoneOff,
   Smile,
   Hand,
@@ -197,8 +197,8 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
         <button
           id="btn-toggle-screen-share"
           onClick={onToggleScreenShare}
-          title={isScreenSharing ? 'Parar de compartilhar tela' : 'Compartilhar tela'}
-          aria-label={isScreenSharing ? 'Parar de compartilhar tela' : 'Compartilhar tela'}
+          title={isScreenSharing ? 'Parar apresentação de tela' : 'Apresentar tela inteira'}
+          aria-label={isScreenSharing ? 'Parar apresentação de tela' : 'Apresentar tela inteira'}
           className={`w-9 h-9 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer ${
             isScreenSharing
               ? 'bg-[#a8c7fa] text-[#041e49] hover:bg-[#8ab4f8] shadow-md ring-2 ring-[#a8c7fa]/40'
@@ -206,9 +206,9 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
           }`}
         >
           {isScreenSharing ? (
-            <ScreenShareOff className="w-4 h-4 sm:w-5 sm:h-5" />
+            <MonitorOff className="w-4 h-4 sm:w-5 sm:h-5" />
           ) : (
-            <ScreenShare className="w-4 h-4 sm:w-5 sm:h-5" />
+            <MonitorUp className="w-4 h-4 sm:w-5 sm:h-5" />
           )}
         </button>
 

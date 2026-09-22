@@ -5,7 +5,7 @@ import {
   Mic,
   MicOff,
   Hand,
-  ScreenShare,
+  MonitorUp,
   User,
   Pin,
   Sliders,
@@ -272,8 +272,8 @@ export const VideoTile: React.FC<VideoTileProps> = ({
       {/* Screen Sharing Tag */}
       {participant.isScreenSharing && (
         <div className="absolute top-3 right-3 bg-[#8ab4f8] text-[#041e49] text-xs font-semibold px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-md z-10">
-          <ScreenShare className="w-3.5 h-3.5" />
-          <span>Apresentando</span>
+          <MonitorUp className="w-3.5 h-3.5" />
+          <span>Apresentando tela</span>
         </div>
       )}
 

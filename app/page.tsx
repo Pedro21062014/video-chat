@@ -812,32 +812,7 @@ export default function MeetingApp() {
     if (!isInRoom || !roomId || !currentUserId) return;
 
     const executeImmediateLeave = () => {
-      const clientId = getClientId();
-      const payload = JSON.stringify({ roomId, userId: currentUserId, clientId });
-
-      // 1. Web standard guaranteed transmission on unload (Beacon API)
-      if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
-        try {
-          const blob = new Blob([payload], { type: 'application/json' });
-          navigator.sendBeacon('/api/rooms/leave', blob);
-        } catch {
-          // ignore
-        }
-      }
-
-      // 2. Fetch with keepalive (survives tab closure in modern browsers)
-      try {
-        fetch('/api/rooms/leave', {
-          method: 'POST',
-          body: payload,
-          headers: { 'Content-Type': 'application/json' },
-          keepalive: true,
-        }).catch(() => {});
-      } catch {
-        // ignore
-      }
-
-      // 3. Immediately turn off camera and microphone tracks
+      // 1. Immediately turn off camera and microphone tracks
       if (localStreamRef.current) {
         try {
           localStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -853,7 +828,7 @@ export default function MeetingApp() {
         }
       }
 
-      // 4. Tear down WebRTC connections immediately so peers detect socket disconnect instantly
+      // 2. Tear down WebRTC connections immediately so peers detect socket disconnect instantly
       if (webrtcManagerRef.current) {
         try {
           webrtcManagerRef.current.closeAll().catch(() => {});
@@ -862,7 +837,7 @@ export default function MeetingApp() {
         }
       }
 
-      // 5. Fire direct Firestore deletion and session cleanup
+      // 3. Fire direct Firestore deletion and session cleanup
       try {
         leaveCallSession(roomId, currentUserId).catch(() => {});
         const pRef = doc(db, 'rooms', roomId, 'participants', currentUserId);

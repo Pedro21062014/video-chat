@@ -445,13 +445,13 @@ export const IntegrationDocsModal: React.FC<IntegrationDocsModalProps> = ({
                 </table>
               </div>
 
-              {/* API REST Endpoint */}
+              {/* SDK Session Generator Helper */}
               <div className="space-y-2">
-                <span className="text-xs font-semibold text-[#8ab4f8]">Endpoint REST de Criação de Salas:</span>
+                <span className="text-xs font-semibold text-[#8ab4f8]">Gerador Automático de Sessão via SDK:</span>
                 <div className="bg-[#131417] p-3.5 rounded-xl border border-[#3c4043]/50 font-mono text-xs text-[#e8eaed] space-y-2">
-                  <div className="text-emerald-400 font-bold">GET /api/integration/create-room</div>
+                  <div className="text-emerald-400 font-bold">VideoMeet.createSession()</div>
                   <p className="text-[11px] text-[#9aa0a6] font-sans">
-                    Retorna links prontos em JSON para o transmissor, receptor e embed sem precisar de autenticação.
+                    Retorna links prontos e códigos de pareamento instantaneamente no cliente para transmissor, receptor ou embed, sem precisar de backend adicional.
                   </p>
                 </div>
               </div>

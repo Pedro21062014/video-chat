@@ -7,8 +7,8 @@ import {
   Mic,
   MicOff,
   SwitchCamera,
-  ScreenShare,
-  ScreenShareOff,
+  MonitorUp,
+  MonitorOff,
   Copy,
   Check,
   Maximize2,
@@ -388,9 +388,9 @@ export const StreamBroadcastView: React.FC<StreamBroadcastViewProps> = ({
                 }`}
               >
                 {isScreenSharing ? (
-                  <ScreenShareOff className="w-5 h-5" />
+                  <MonitorOff className="w-5 h-5" />
                 ) : (
-                  <ScreenShare className="w-5 h-5" />
+                  <MonitorUp className="w-5 h-5" />
                 )}
               </button>
 

@@ -125,6 +125,23 @@
     },
 
     /**
+     * Gera links e URLs completas de sessão para transmissor, receptor e reunião.
+     */
+    createSession: function (customCode, customBaseUrl) {
+      var code = customCode || this.generateCode();
+      var base = this._getBaseUrl(customBaseUrl);
+      return {
+        roomCode: code,
+        senderUrl: base + '/?mode=stream&role=sender&room=' + encodeURIComponent(code),
+        viewerUrl: base + '/?mode=stream&role=viewer&room=' + encodeURIComponent(code),
+        meetingUrl: base + '/?room=' + encodeURIComponent(code),
+        senderEmbedUrl: base + '/?mode=stream&role=sender&room=' + encodeURIComponent(code) + '&embed=true',
+        viewerEmbedUrl: base + '/?mode=stream&role=viewer&room=' + encodeURIComponent(code) + '&embed=true',
+        meetingEmbedUrl: base + '/?room=' + encodeURIComponent(code) + '&embed=true',
+      };
+    },
+
+    /**
      * MODO 3: Chamada de Vídeo Completa (Full Meeting Embed)
      * Reunião bidirecional completa com controles, áudio, vídeo e chat.
      */
