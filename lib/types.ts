@@ -155,3 +155,13 @@ export const VIDEO_QUALITIES: VideoQualityOption[] = [
   },
 ];
 
+export type AppMode = 'meeting' | 'stream';
+export type StreamRole = 'sender' | 'viewer';
+
+export interface StreamSessionInfo {
+  roomCode: string;
+  role: StreamRole;
+  isEmbed?: boolean;
+}
+
+

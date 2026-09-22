@@ -21,6 +21,8 @@ import {
   VIDEO_QUALITIES,
   VideoQualityId,
   NetworkStatsInfo,
+  AppMode,
+  StreamRole,
 } from '@/lib/types';
 import { PeerConnectionManager } from '@/lib/webrtc';
 import { sound } from '@/lib/sound';
@@ -36,6 +38,8 @@ import { CameraSettingsModal } from '@/components/CameraSettingsModal';
 import { WhatsAppTwoPartyView } from '@/components/WhatsAppTwoPartyView';
 import { NetworkAlertBanner } from '@/components/NetworkAlertBanner';
 import { NetworkQualityPill } from '@/components/NetworkQualityPill';
+import { StreamBroadcastView } from '@/components/StreamBroadcastView';
+import { IntegrationDocsModal } from '@/components/IntegrationDocsModal';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { AudioActivityDetector } from '@/lib/audioDetector';
@@ -45,7 +49,7 @@ import {
   leaveCallSession,
   getClientId,
 } from '@/lib/callsLimit';
-import { Info, Copy, Check, LayoutGrid, Volume2, UserCheck, Sparkles } from 'lucide-react';
+import { Info, Copy, Check, LayoutGrid, Volume2, UserCheck, Sparkles, Code2, Radio, Tv } from 'lucide-react';
 
 const AVATAR_COLORS = [
   '#3b82f6', // blue
@@ -63,6 +67,27 @@ export default function MeetingApp() {
   const [displayName, setDisplayName] = useState<string>('');
   const [isHost, setIsHost] = useState(false);
   const [notificationMessage, setNotificationMessage] = useState<string | null>(null);
+
+  // Integration & Stream Mode states
+  const [appMode, setAppMode] = useState<AppMode>('meeting');
+  const [streamRole, setStreamRole] = useState<StreamRole>('sender');
+  const [isEmbedMode, setIsEmbedMode] = useState(false);
+  const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
+
+  const handleJoinRoomRef = useRef<
+    | ((
+        targetRoom: string,
+        userName: string,
+        initialAudioMuted: boolean,
+        initialVideoMuted: boolean,
+        selectedCameraId?: string,
+        isNewRoom?: boolean,
+        existingStream?: MediaStream | null,
+        appModeParam?: AppMode,
+        streamRoleParam?: StreamRole
+      ) => void)
+    | null
+  >(null);
 
   const connectedPeersRef = useRef<Set<string>>(new Set());
 
@@ -176,15 +201,61 @@ export default function MeetingApp() {
         // ignore
       }
 
-      // Check query parameter ?room=... and retain it!
+      // Check query parameters (?room=..., ?mode=..., ?role=..., ?embed=..., etc.)
       const params = new URLSearchParams(window.location.search);
       const queryRoom = (params.get('room') || '').toLowerCase().trim();
-      if (queryRoom) {
-        const timer = setTimeout(() => {
+      const queryMode = (params.get('mode') || '').toLowerCase().trim() as AppMode;
+      const queryRole = (params.get('role') || '').toLowerCase().trim() as StreamRole;
+      const queryEmbed = params.get('embed') === 'true' || params.get('embed') === '1';
+      const queryName = params.get('name') || '';
+      const queryAudio = params.get('audio');
+      const queryVideo = params.get('video');
+      const queryQuality = params.get('quality') as VideoQualityId;
+
+      const initTimer = setTimeout(() => {
+        if (queryMode === 'stream' || queryMode === 'meeting') {
+          setAppMode(queryMode);
+        }
+        if (queryRole === 'sender' || queryRole === 'viewer') {
+          setStreamRole(queryRole);
+        }
+        if (queryEmbed) {
+          setIsEmbedMode(true);
+        }
+        if (queryName) {
+          setDisplayName(queryName);
+        }
+        if (queryQuality && VIDEO_QUALITIES.some((q) => q.id === queryQuality)) {
+          setVideoQuality(queryQuality);
+        }
+        if (queryAudio === '0' || queryAudio === 'false') {
+          setIsAudioMuted(true);
+        }
+        if (queryVideo === '0' || queryVideo === 'false') {
+          setIsVideoMuted(true);
+        }
+
+        if (queryRoom) {
           setRoomId(queryRoom);
-        }, 0);
-        return () => clearTimeout(timer);
-      }
+
+          // Auto-join if embedding or explicit stream mode with room specified
+          if (queryEmbed || queryMode === 'stream') {
+            handleJoinRoomRef.current?.(
+              queryRoom,
+              queryName || (queryRole === 'viewer' ? 'Visualizador' : 'Transmissor'),
+              queryAudio === '0' || queryAudio === 'false',
+              queryVideo === '0' || queryVideo === 'false',
+              undefined,
+              queryRole === 'sender',
+              null,
+              queryMode || 'stream',
+              queryRole || 'viewer'
+            );
+          }
+        }
+      }, 0);
+
+      return () => clearTimeout(initTimer);
     } catch (err) {
       console.warn('Safe client init warning:', err);
     }
@@ -331,9 +402,17 @@ export default function MeetingApp() {
     initialVideoMuted: boolean,
     selectedCameraId?: string,
     isNewRoom?: boolean,
-    existingStream?: MediaStream | null
+    existingStream?: MediaStream | null,
+    appModeParam?: AppMode,
+    streamRoleParam?: StreamRole
   ) => {
-    const finalName = (userName && userName.trim()) || 'Participante';
+    const finalMode = appModeParam || appMode;
+    const finalRole = streamRoleParam || streamRole;
+    setAppMode(finalMode);
+    setStreamRole(finalRole);
+
+    const defaultRoleName = finalMode === 'stream' ? (finalRole === 'viewer' ? 'Visualizador' : 'Transmissor') : 'Participante';
+    const finalName = (userName && userName.trim()) || defaultRoleName;
     const userId = 'usr' + Math.random().toString(36).substring(2, 10);
     meetingStartTimeRef.current = Date.now();
     setCurrentUserId(userId);
@@ -401,6 +480,14 @@ export default function MeetingApp() {
 
     // 2. Concurrently get User Media with chosen quality without blocking room render
     (async () => {
+      // If user is a stream VIEWER, they do not need local camera or mic!
+      if (finalMode === 'stream' && finalRole === 'viewer') {
+        const dummyStream = new MediaStream();
+        localStreamRef.current = dummyStream;
+        setLocalStream(dummyStream);
+        return;
+      }
+
       try {
         // A. If existingStream from Lobby is already live, seamlessly reuse it so camera never disappears!
         if (existingStream && !initialVideoMuted) {
@@ -599,6 +686,10 @@ export default function MeetingApp() {
       }
     })();
   };
+
+  useEffect(() => {
+    handleJoinRoomRef.current = handleJoinRoom;
+  });
 
   // Leave Call / Hangup
   const handleLeaveCall = async () => {
@@ -1288,6 +1379,64 @@ export default function MeetingApp() {
     })),
   ];
 
+  // If in STREAM mode (Transmission / Camera P2P via code)
+  if (appMode === 'stream') {
+    const firstRemoteStream =
+      uniqueRemoteParticipants.length > 0 && uniqueRemoteParticipants[0]
+        ? remoteStreams.get(uniqueRemoteParticipants[0].userId) || null
+        : Array.from(remoteStreams.values())[0] || null;
+
+    return (
+      <ErrorBoundary
+        fallbackTitle="Transmissão Protegida"
+        fallbackDescription="A transmissão encontrou uma instabilidade e foi reiniciada."
+        onReset={() => handleLeaveCall()}
+      >
+        <StreamBroadcastView
+          roomCode={roomId}
+          role={streamRole}
+          localStream={localStream}
+          remoteStream={firstRemoteStream}
+          isAudioMuted={isAudioMuted}
+          isVideoMuted={isVideoMuted}
+          isScreenSharing={isScreenSharing}
+          availableCameras={availableCameras}
+          activeCameraId={activeCameraId}
+          videoQuality={videoQuality}
+          isEmbed={isEmbedMode}
+          onToggleAudio={handleToggleAudio}
+          onToggleVideo={handleToggleVideo}
+          onToggleScreenShare={handleToggleScreenShare}
+          onSwitchCamera={handleSwitchCamera}
+          onChangeQuality={handleChangeVideoQuality}
+          onLeave={handleLeaveCall}
+          onOpenIntegrationDocs={() => setIsDocsModalOpen(true)}
+        />
+
+        {/* Integration & SDK Modal */}
+        <IntegrationDocsModal
+          isOpen={isDocsModalOpen}
+          onClose={() => setIsDocsModalOpen(false)}
+          currentRoomId={roomId}
+        />
+
+        {/* Camera Quality Settings Modal */}
+        <CameraSettingsModal
+          isOpen={isCameraSettingsOpen}
+          onClose={() => setIsCameraSettingsOpen(false)}
+          currentQuality={videoQuality}
+          onChangeQuality={handleChangeVideoQuality}
+          availableCameras={availableCameras}
+          activeCameraId={activeCameraId}
+          onChangeCamera={handleChangeCamera}
+          isVideoMuted={isVideoMuted}
+          onToggleVideo={handleToggleVideo}
+          localStream={localStream}
+        />
+      </ErrorBoundary>
+    );
+  }
+
   // Dynamic Grid & Speaker Spotlight layout calculation
   const totalCount = allTiles.length;
 
@@ -1394,6 +1543,16 @@ export default function MeetingApp() {
             networkInfo={networkInfo}
             onClick={() => setIsNetworkAlertDismissed(false)}
           />
+
+          {/* Integration & SDK Modal Button */}
+          <button
+            onClick={() => setIsDocsModalOpen(true)}
+            title="Ver Documentação de Integração e SDK"
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-[#3c4043]/60 hover:bg-[#3c4043] text-[#8ab4f8] transition-colors border border-[#3c4043]"
+          >
+            <Code2 className="w-3.5 h-3.5 text-[#8ab4f8]" />
+            <span>Integração</span>
+          </button>
 
           <span className="font-medium text-[#e8eaed]">{currentTime}</span>
         </div>
@@ -1649,6 +1808,13 @@ export default function MeetingApp() {
         onClose={() => setIsParticipantsOpen(false)}
         participants={participants}
         currentUserId={currentUserId}
+      />
+
+      {/* Integration & SDK Modal */}
+      <IntegrationDocsModal
+        isOpen={isDocsModalOpen}
+        onClose={() => setIsDocsModalOpen(false)}
+        currentRoomId={roomId}
       />
       </div>
     </ErrorBoundary>

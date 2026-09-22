@@ -13,12 +13,19 @@ import {
   Volume2,
   AlertCircle,
   WifiOff,
+  Code2,
+  Radio,
+  Tv,
+  ExternalLink,
+  Layers,
+  Sparkles,
 } from 'lucide-react';
 import { sound } from '@/lib/sound';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { checkCallLimit } from '@/lib/callsLimit';
-import { NetworkStatsInfo } from '@/lib/types';
+import { AppMode, NetworkStatsInfo, StreamRole } from '@/lib/types';
+import { IntegrationDocsModal } from '@/components/IntegrationDocsModal';
 
 const DEFAULT_PARTICIPANT_NAME = 'Participante';
 
@@ -31,7 +38,9 @@ interface LobbyProps {
     initialVideoMuted: boolean,
     selectedDeviceId?: string,
     isNewRoom?: boolean,
-    existingStream?: MediaStream | null
+    existingStream?: MediaStream | null,
+    appMode?: AppMode,
+    streamRole?: StreamRole
   ) => void;
   notificationMessage?: string | null;
   networkInfo?: NetworkStatsInfo | null;
@@ -58,6 +67,10 @@ export const Lobby: React.FC<LobbyProps> = ({
   const [isCreatingMeeting, setIsCreatingMeeting] = useState(false);
   const [isJoiningMeeting, setIsJoiningMeeting] = useState(false);
   const [roomError, setRoomError] = useState<string | null>(null);
+  const [lobbyMode, setLobbyMode] = useState<'meeting' | 'stream'>('meeting');
+  const [isDocsOpen, setIsDocsOpen] = useState(false);
+  const [streamPairCode, setStreamPairCode] = useState('');
+
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewStreamRef = useRef<MediaStream | null>(null);
@@ -344,10 +357,44 @@ export const Lobby: React.FC<LobbyProps> = ({
       const finalName = displayName.trim() || DEFAULT_PARTICIPANT_NAME;
       isTransitioningToRoomRef.current = true;
       sound.playJoin();
-      onJoinRoom(cleanCode, finalName, isAudioMuted, isVideoMuted, selectedCameraId, false, previewStream);
+      onJoinRoom(cleanCode, finalName, isAudioMuted, isVideoMuted, selectedCameraId, false, previewStream, 'meeting');
     } catch (err) {
       console.error('Erro ao verificar sala:', err);
       setRoomError('Não foi possível verificar a sala no momento. Tente novamente.');
+    } finally {
+      setIsJoiningMeeting(false);
+    }
+  };
+
+  // Start Transmission as SENDER (Broadcast Camera/Screen only)
+  const handleStartBroadcastSender = async () => {
+    if (isCreatingMeeting || isJoiningMeeting) return;
+    setIsCreatingMeeting(true);
+    setRoomError(null);
+
+    const code = streamPairCode.trim() ? streamPairCode.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') : generateRoomCode();
+    const finalName = displayName.trim() || 'Transmissor';
+    isTransitioningToRoomRef.current = true;
+    sound.playJoin();
+    onJoinRoom(code, finalName, isAudioMuted, isVideoMuted, selectedCameraId, true, previewStream, 'stream', 'sender');
+  };
+
+  // Join Transmission as VIEWER (Watch Remote Camera in Fullscreen)
+  const handleJoinBroadcastViewer = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const cleanCode = (streamPairCode || targetRoomId).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    if (!cleanCode) {
+      setRoomError('Informe um código de pareamento válido para assistir.');
+      return;
+    }
+    setRoomError(null);
+    setIsJoiningMeeting(true);
+
+    try {
+      const finalName = displayName.trim() || 'Visualizador';
+      isTransitioningToRoomRef.current = true;
+      sound.playJoin();
+      onJoinRoom(cleanCode, finalName, true, true, undefined, false, null, 'stream', 'viewer');
     } finally {
       setIsJoiningMeeting(false);
     }
@@ -378,9 +425,19 @@ export const Lobby: React.FC<LobbyProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-4 text-[#9aa0a6] text-sm">
+        <div className="flex items-center gap-3 sm:gap-4">
+          {/* Integration & SDK Modal Trigger Button */}
+          <button
+            onClick={() => setIsDocsOpen(true)}
+            title="Documentação de Integração, Pareamento e SDK Gratuito"
+            className="flex items-center gap-2 bg-[#28292c] hover:bg-[#3c4043] text-[#8ab4f8] hover:text-white px-3.5 py-1.5 rounded-full text-xs font-medium border border-[#3c4043] transition-all shadow-sm"
+          >
+            <Code2 className="w-4 h-4 text-[#8ab4f8]" />
+            <span className="hidden sm:inline">Integração & API</span>
+          </button>
+
           {currentClock && (
-            <div className="flex items-center gap-2">
+            <div className="hidden md:flex items-center gap-2 text-[#9aa0a6] text-sm">
               <span className="font-normal text-[#e8eaed]">{currentClock}</span>
               <span>•</span>
               <span className="capitalize">{currentDateStr}</span>
@@ -392,13 +449,43 @@ export const Lobby: React.FC<LobbyProps> = ({
       {/* Main Container: VideoMeet Homepage Layout */}
       <main className="w-full max-w-7xl mx-auto px-6 py-8 my-auto grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-center">
         {/* Left: VideoMeet Action & Typography */}
-        <div className="lg:col-span-6 flex flex-col gap-8">
+        <div className="lg:col-span-6 flex flex-col gap-6 sm:gap-8">
+          {/* Mode Switcher Tabs */}
+          <div className="inline-flex p-1 rounded-xl bg-[#28292c] border border-[#3c4043]/70 self-start max-w-full">
+            <button
+              onClick={() => setLobbyMode('meeting')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium transition-all ${
+                lobbyMode === 'meeting'
+                  ? 'bg-[#1a73e8] text-white shadow-sm'
+                  : 'text-[#9aa0a6] hover:text-white'
+              }`}
+            >
+              <Video className="w-3.5 h-3.5" />
+              <span>Reunião de Vídeo</span>
+            </button>
+            <button
+              onClick={() => setLobbyMode('stream')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium transition-all ${
+                lobbyMode === 'stream'
+                  ? 'bg-[#1a73e8] text-white shadow-sm'
+                  : 'text-[#9aa0a6] hover:text-white'
+              }`}
+            >
+              <Radio className="w-3.5 h-3.5" />
+              <span>Transmissão & Pareamento</span>
+            </button>
+          </div>
+
           <div className="flex flex-col gap-3">
-            <h1 className="text-3xl sm:text-4xl lg:text-[44px] font-normal leading-[1.15] text-[#e8eaed] tracking-tight">
-              Videochamadas premium. Agora gratuitas para todos.
+            <h1 className="text-3xl sm:text-4xl lg:text-[42px] font-normal leading-[1.15] text-[#e8eaed] tracking-tight">
+              {lobbyMode === 'meeting'
+                ? 'Videochamadas premium. Agora gratuitas para todos.'
+                : 'Transmissão P2P de Câmera via Código.'}
             </h1>
             <p className="text-base sm:text-lg text-[#9aa0a6] font-normal leading-relaxed max-w-xl">
-              Criamos o VideoMeet para que todos possam se conectar, colaborar e comemorar com segurança e estabilidade de qualquer lugar.
+              {lobbyMode === 'meeting'
+                ? 'Criamos o VideoMeet para que todos possam se conectar, colaborar e comemorar com segurança e estabilidade de qualquer lugar.'
+                : 'Transmita sua câmera ou tela diretamente para outro dispositivo, site ou OBS com pareamento instantâneo via código.'}
             </p>
           </div>
 
@@ -443,7 +530,7 @@ export const Lobby: React.FC<LobbyProps> = ({
           {/* User Name Input */}
           <div className="flex flex-col gap-1.5 max-w-md">
             <label htmlFor="input-display-name" className="text-xs text-[#9aa0a6] font-medium">
-              Seu nome na reunião
+              Seu nome de identificação
             </label>
             <input
               id="input-display-name"
@@ -456,74 +543,146 @@ export const Lobby: React.FC<LobbyProps> = ({
             />
           </div>
 
-          {/* Action Row: White Instant Meeting Button + Code Input */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
-            {/* "Nova reunião" Button with Skeleton Loader */}
-            {isCreatingMeeting ? (
-              <div
-                id="btn-create-meeting-skeleton"
-                aria-label="Iniciando reunião..."
-                className="h-12 w-44 rounded-full bg-[#3c4043] animate-pulse flex items-center justify-center gap-2.5 px-6 shrink-0 border border-white/10 select-none shadow-sm"
-              >
-                <div className="w-4 h-4 rounded-full bg-[#80868b] animate-pulse" />
-                <div className="h-4 w-20 rounded bg-[#80868b] animate-pulse" />
-              </div>
-            ) : (
-              <button
-                id="btn-create-instant-meeting"
-                type="button"
-                onClick={handleStartInstantMeeting}
-                disabled={isJoiningMeeting}
-                className="h-12 px-6 rounded-full bg-white hover:bg-[#f1f3f4] active:bg-[#e8eaed] text-[#202124] font-medium text-sm flex items-center justify-center gap-2.5 shadow-sm transition-all shrink-0 cursor-pointer disabled:opacity-50"
-              >
-                <Video className="w-4 h-4 text-[#202124]" />
-                <span>Nova reunião</span>
-              </button>
-            )}
-
-            {/* Input Room Code / Join Form */}
-            <form onSubmit={handleJoinExistingRoom} className="flex-1 flex items-center gap-2">
-              <div className="relative flex-1">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#9aa0a6]">
-                  <Keyboard className="w-4 h-4" />
-                </div>
-                <input
-                  id="input-room-code"
-                  type="text"
-                  value={targetRoomId}
-                  onChange={(e) => {
-                    setTargetRoomId(e.target.value);
-                    if (roomError) setRoomError(null);
-                  }}
-                  placeholder="Digite um código ou link"
-                  disabled={isCreatingMeeting || isJoiningMeeting}
-                  className="w-full h-12 pl-10 pr-3.5 bg-transparent border border-[#5f6368] focus:border-[#8ab4f8] rounded-md text-sm text-[#e8eaed] placeholder-[#80868b] focus:outline-none transition-colors disabled:opacity-50"
-                />
-              </div>
-
-              {targetRoomId.trim() && (
-                <button
-                  id="btn-join-existing-room"
-                  type="submit"
-                  disabled={isCreatingMeeting || isJoiningMeeting}
-                  className="h-12 px-5 rounded-md text-[#8ab4f8] hover:bg-[#8ab4f8]/10 text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+          {/* MODE 1: STANDARD MEETING */}
+          {lobbyMode === 'meeting' ? (
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+              {/* "Nova reunião" Button with Skeleton Loader */}
+              {isCreatingMeeting ? (
+                <div
+                  id="btn-create-meeting-skeleton"
+                  aria-label="Iniciando reunião..."
+                  className="h-12 w-44 rounded-full bg-[#3c4043] animate-pulse flex items-center justify-center gap-2.5 px-6 shrink-0 border border-white/10 select-none shadow-sm"
                 >
-                  {isJoiningMeeting ? (
-                    <div className="w-4 h-4 rounded-full border-2 border-[#8ab4f8] border-t-transparent animate-spin" />
-                  ) : null}
-                  <span>Participar</span>
+                  <div className="w-4 h-4 rounded-full bg-[#80868b] animate-pulse" />
+                  <div className="h-4 w-20 rounded bg-[#80868b] animate-pulse" />
+                </div>
+              ) : (
+                <button
+                  id="btn-create-instant-meeting"
+                  type="button"
+                  onClick={handleStartInstantMeeting}
+                  disabled={isJoiningMeeting}
+                  className="h-12 px-6 rounded-full bg-white hover:bg-[#f1f3f4] active:bg-[#e8eaed] text-[#202124] font-medium text-sm flex items-center justify-center gap-2.5 shadow-sm transition-all shrink-0 cursor-pointer disabled:opacity-50"
+                >
+                  <Video className="w-4 h-4 text-[#202124]" />
+                  <span>Nova reunião</span>
                 </button>
               )}
-            </form>
-          </div>
+
+              {/* Input Room Code / Join Form */}
+              <form onSubmit={handleJoinExistingRoom} className="flex-1 flex items-center gap-2">
+                <div className="relative flex-1">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#9aa0a6]">
+                    <Keyboard className="w-4 h-4" />
+                  </div>
+                  <input
+                    id="input-room-code"
+                    type="text"
+                    value={targetRoomId}
+                    onChange={(e) => {
+                      setTargetRoomId(e.target.value);
+                      if (roomError) setRoomError(null);
+                    }}
+                    placeholder="Digite um código ou link"
+                    disabled={isCreatingMeeting || isJoiningMeeting}
+                    className="w-full h-12 pl-10 pr-3.5 bg-transparent border border-[#5f6368] focus:border-[#8ab4f8] rounded-md text-sm text-[#e8eaed] placeholder-[#80868b] focus:outline-none transition-colors disabled:opacity-50"
+                  />
+                </div>
+
+                {targetRoomId.trim() && (
+                  <button
+                    id="btn-join-existing-room"
+                    type="submit"
+                    disabled={isCreatingMeeting || isJoiningMeeting}
+                    className="h-12 px-5 rounded-md text-[#8ab4f8] hover:bg-[#8ab4f8]/10 text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {isJoiningMeeting ? (
+                      <div className="w-4 h-4 rounded-full border-2 border-[#8ab4f8] border-t-transparent animate-spin" />
+                    ) : null}
+                    <span>Participar</span>
+                  </button>
+                )}
+              </form>
+            </div>
+          ) : (
+            /* MODE 2: STREAM & PAIRING */
+            <div className="flex flex-col gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-md">
+                {/* 1. Transmit Camera Card */}
+                <button
+                  type="button"
+                  onClick={handleStartBroadcastSender}
+                  className="p-4 rounded-xl bg-gradient-to-br from-[#1a73e8] to-[#1558b0] text-white hover:brightness-110 active:scale-[0.99] transition-all flex flex-col items-start gap-2 shadow-lg text-left"
+                >
+                  <div className="p-2 rounded-lg bg-white/20">
+                    <Radio className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <div className="font-semibold text-sm">Transmitir Minha Câmera</div>
+                    <div className="text-[11px] text-white/80 mt-0.5">Gera código de pareamento instantâneo</div>
+                  </div>
+                </button>
+
+                {/* 2. Integration Docs Quick Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsDocsOpen(true)}
+                  className="p-4 rounded-xl bg-[#28292c] border border-[#3c4043] text-[#e8eaed] hover:bg-[#323639] transition-all flex flex-col items-start gap-2 text-left"
+                >
+                  <div className="p-2 rounded-lg bg-[#3c4043]">
+                    <Code2 className="w-5 h-5 text-[#8ab4f8]" />
+                  </div>
+                  <div>
+                    <div className="font-semibold text-sm">Código de Integração</div>
+                    <div className="text-[11px] text-[#9aa0a6] mt-0.5">Iframe, React, OBS e SDK JavaScript</div>
+                  </div>
+                </button>
+              </div>
+
+              {/* Input for Watching / Receiver */}
+              <form onSubmit={handleJoinBroadcastViewer} className="flex items-center gap-2 max-w-md">
+                <div className="relative flex-1">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#9aa0a6]">
+                    <Tv className="w-4 h-4" />
+                  </div>
+                  <input
+                    type="text"
+                    value={streamPairCode}
+                    onChange={(e) => setStreamPairCode(e.target.value)}
+                    placeholder="Código para assistir transmissão"
+                    className="w-full h-12 pl-10 pr-3.5 bg-transparent border border-[#5f6368] focus:border-[#8ab4f8] rounded-md text-sm text-[#e8eaed] placeholder-[#80868b] focus:outline-none transition-colors"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={!streamPairCode.trim()}
+                  className="h-12 px-5 rounded-md bg-[#28292c] hover:bg-[#3c4043] text-[#8ab4f8] font-medium text-sm transition-colors border border-[#3c4043] disabled:opacity-40"
+                >
+                  Assistir
+                </button>
+              </form>
+            </div>
+          )}
 
           <div className="h-px bg-[#3c4043] w-full max-w-md my-1" />
 
-          <div className="flex items-center gap-2 text-xs text-[#9aa0a6]">
-            <Shield className="w-4 h-4 text-[#8ab4f8]" />
-            <span>Suas reuniões são criptografadas e seguras ponto a ponto (WebRTC).</span>
+          <div className="flex items-center justify-between max-w-md text-xs text-[#9aa0a6]">
+            <div className="flex items-center gap-2">
+              <Shield className="w-4 h-4 text-[#8ab4f8]" />
+              <span>Criptografado e gratuito ponto a ponto (WebRTC).</span>
+            </div>
+
+            <button
+              onClick={() => setIsDocsOpen(true)}
+              className="text-[#8ab4f8] hover:underline font-medium text-xs flex items-center gap-1"
+            >
+              <span>Ver Guia & API</span>
+              <ExternalLink className="w-3 h-3" />
+            </button>
           </div>
         </div>
+
 
         {/* Right: Camera Preview Container exactly like Meet Green Room */}
         <div className="lg:col-span-6 flex flex-col items-center justify-center w-full">
@@ -666,6 +825,13 @@ export const Lobby: React.FC<LobbyProps> = ({
           <span>Termos</span>
         </div>
       </footer>
+
+      {/* Integration & SDK Documentation Modal */}
+      <IntegrationDocsModal
+        isOpen={isDocsOpen}
+        onClose={() => setIsDocsOpen(false)}
+        currentRoomId={targetRoomId || streamPairCode}
+      />
     </div>
   );
 };
