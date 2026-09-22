@@ -114,13 +114,23 @@ allow="camera; microphone; display-capture; autoplay"`;
 
           <div className="flex items-center gap-2">
             <a
+              href="/docs"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-xs text-[#8ab4f8] hover:text-[#aecbfa] bg-[#272a32] px-3 py-1.5 rounded-lg border border-[#383d47] transition-colors"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Ver Página de Docs (/docs)</span>
+            </a>
+
+            <a
               href="/docs.txt"
               target="_blank"
               rel="noopener noreferrer"
-              className="hidden sm:flex items-center gap-1.5 text-xs text-[#8ab4f8] hover:text-[#aecbfa] bg-[#272a32] px-3 py-1.5 rounded-lg border border-[#383d47] transition-colors"
+              className="hidden md:flex items-center gap-1.5 text-xs text-[#8ab4f8] hover:text-[#aecbfa] bg-[#272a32] px-3 py-1.5 rounded-lg border border-[#383d47] transition-colors"
             >
               <FileText className="w-3.5 h-3.5" />
-              <span>Abrir TXT para IA (/docs.txt)</span>
+              <span>TXT para IA (/docs.txt)</span>
             </a>
 
             <button

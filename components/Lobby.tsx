@@ -19,6 +19,9 @@ import {
   ExternalLink,
   Layers,
   Sparkles,
+  Terminal,
+  FileText,
+  Sliders,
 } from 'lucide-react';
 import { sound } from '@/lib/sound';
 import { db } from '@/lib/firebase';
@@ -26,6 +29,8 @@ import { doc, getDoc } from 'firebase/firestore';
 import { checkCallLimit } from '@/lib/callsLimit';
 import { AppMode, NetworkStatsInfo, StreamRole } from '@/lib/types';
 import { IntegrationDocsModal } from '@/components/IntegrationDocsModal';
+import { DevPlayground } from '@/components/DevPlayground';
+import { DocsView } from '@/components/DocsView';
 
 const DEFAULT_PARTICIPANT_NAME = 'Participante';
 
@@ -67,9 +72,25 @@ export const Lobby: React.FC<LobbyProps> = ({
   const [isCreatingMeeting, setIsCreatingMeeting] = useState(false);
   const [isJoiningMeeting, setIsJoiningMeeting] = useState(false);
   const [roomError, setRoomError] = useState<string | null>(null);
-  const [lobbyMode, setLobbyMode] = useState<'meeting' | 'stream'>('meeting');
+  const [lobbyMode, setLobbyMode] = useState<'meeting' | 'stream' | 'dev' | 'docs'>('meeting');
   const [isDocsOpen, setIsDocsOpen] = useState(false);
   const [streamPairCode, setStreamPairCode] = useState('');
+
+  // Detect URL parameter ?tab=dev or ?tab=docs
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const timer = setTimeout(() => {
+        const params = new URLSearchParams(window.location.search);
+        const tab = params.get('tab');
+        if (tab === 'dev') {
+          setLobbyMode('dev');
+        } else if (tab === 'docs') {
+          setLobbyMode('docs');
+        }
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, []);
 
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -402,12 +423,15 @@ export const Lobby: React.FC<LobbyProps> = ({
 
   return (
     <div className="min-h-screen w-full flex flex-col justify-between bg-[#202124] text-[#e8eaed] font-sans antialiased">
-      {/* Header with User's Logo and VideoMeet Branding */}
-      <header className="w-full flex items-center justify-between px-6 py-4 border-b border-[#3c4043]/40">
+      {/* Header with User's Logo and Modern Minimalist Navbar */}
+      <header className="w-full flex items-center justify-between px-4 sm:px-6 py-3.5 border-b border-[#3c4043]/40 bg-[#1e1f23]">
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-3">
+          <button
+            onClick={() => setLobbyMode('meeting')}
+            className="flex items-center gap-3 focus:outline-none cursor-pointer group"
+          >
             {/* Custom Logo */}
-            <div className="relative w-10 h-10 rounded-xl overflow-hidden shadow-sm flex items-center justify-center bg-[#28292c] border border-[#3c4043]/50">
+            <div className="relative w-9 h-9 sm:w-10 sm:h-10 rounded-xl overflow-hidden shadow-sm flex items-center justify-center bg-[#28292c] border border-[#3c4043]/50 group-hover:border-[#8ab4f8]/50 transition-colors">
               <Image
                 src="/logo_video_bonito.png"
                 alt="VideoMeet Logo"
@@ -417,27 +441,46 @@ export const Lobby: React.FC<LobbyProps> = ({
                 priority
               />
             </div>
-            <div className="flex flex-col">
-              <span className="text-[20px] font-semibold tracking-tight text-[#e8eaed] flex items-center gap-1">
+            <div className="flex flex-col text-left">
+              <span className="text-lg sm:text-[20px] font-semibold tracking-tight text-[#e8eaed] flex items-center gap-1">
                 Video<span className="text-[#8ab4f8]">Meet</span>
               </span>
             </div>
-          </div>
+          </button>
         </div>
 
-        <div className="flex items-center gap-3 sm:gap-4">
-          {/* Integration & SDK Modal Trigger Button */}
+        {/* Minimalist Modern Navbar Right Actions */}
+        <div className="flex items-center gap-2.5 sm:gap-3">
+          {/* Dev & Playground Button */}
           <button
-            onClick={() => setIsDocsOpen(true)}
-            title="Documentação de Integração, Pareamento e SDK Gratuito"
-            className="flex items-center gap-2 bg-[#28292c] hover:bg-[#3c4043] text-[#8ab4f8] hover:text-white px-3.5 py-1.5 rounded-full text-xs font-medium border border-[#3c4043] transition-all shadow-sm"
+            onClick={() => setLobbyMode(lobbyMode === 'dev' ? 'meeting' : 'dev')}
+            title="Aba de Desenvolvimento & Playground de Câmeras"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all cursor-pointer shadow-sm ${
+              lobbyMode === 'dev'
+                ? 'bg-[#1a73e8] border-[#1a73e8] text-white shadow-md'
+                : 'bg-[#28292c] hover:bg-[#3c4043] text-[#8ab4f8] hover:text-white border-[#3c4043]'
+            }`}
           >
-            <Code2 className="w-4 h-4 text-[#8ab4f8]" />
-            <span className="hidden sm:inline">Integração & API</span>
+            <Terminal className="w-3.5 h-3.5" />
+            <span>Dev & Playground</span>
+          </button>
+
+          {/* Documentação Button */}
+          <button
+            onClick={() => setLobbyMode(lobbyMode === 'docs' ? 'meeting' : 'docs')}
+            title="Documentação e Guia de Integração"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all cursor-pointer shadow-sm ${
+              lobbyMode === 'docs'
+                ? 'bg-[#1a73e8] border-[#1a73e8] text-white shadow-md'
+                : 'bg-[#28292c] hover:bg-[#3c4043] text-[#9aa0a6] hover:text-white border-[#3c4043]'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Documentação</span>
           </button>
 
           {currentClock && (
-            <div className="hidden md:flex items-center gap-2 text-[#9aa0a6] text-sm">
+            <div className="hidden md:flex items-center gap-2 text-[#9aa0a6] text-xs pl-2 border-l border-[#3c4043]/60">
               <span className="font-normal text-[#e8eaed]">{currentClock}</span>
               <span>•</span>
               <span className="capitalize">{currentDateStr}</span>
@@ -446,35 +489,70 @@ export const Lobby: React.FC<LobbyProps> = ({
         </div>
       </header>
 
-      {/* Main Container: VideoMeet Homepage Layout */}
-      <main className="w-full max-w-7xl mx-auto px-6 py-8 my-auto grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-center">
-        {/* Left: VideoMeet Action & Typography */}
-        <div className="lg:col-span-6 flex flex-col gap-6 sm:gap-8">
-          {/* Mode Switcher Tabs */}
-          <div className="inline-flex p-1 rounded-xl bg-[#28292c] border border-[#3c4043]/70 self-start max-w-full">
-            <button
-              onClick={() => setLobbyMode('meeting')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium transition-all ${
-                lobbyMode === 'meeting'
-                  ? 'bg-[#1a73e8] text-white shadow-sm'
-                  : 'text-[#9aa0a6] hover:text-white'
-              }`}
-            >
-              <Video className="w-3.5 h-3.5" />
-              <span>Reunião de Vídeo</span>
-            </button>
-            <button
-              onClick={() => setLobbyMode('stream')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium transition-all ${
-                lobbyMode === 'stream'
-                  ? 'bg-[#1a73e8] text-white shadow-sm'
-                  : 'text-[#9aa0a6] hover:text-white'
-              }`}
-            >
-              <Radio className="w-3.5 h-3.5" />
-              <span>Transmissão & Pareamento</span>
-            </button>
-          </div>
+      {/* RENDER VIEW 1: DEV & PLAYGROUND */}
+      {lobbyMode === 'dev' && (
+        <div className="flex-1 overflow-y-auto py-4">
+          <DevPlayground
+            initialRoomCode={targetRoomId || streamPairCode}
+            onStartBroadcast={(code, role, audioMuted, videoMuted, quality, stream) => {
+              isTransitioningToRoomRef.current = true;
+              onJoinRoom(
+                code,
+                'DevTransmissor',
+                audioMuted,
+                videoMuted,
+                selectedCameraId,
+                true,
+                stream || previewStream,
+                'stream',
+                'sender'
+              );
+            }}
+            onOpenDocs={() => setLobbyMode('docs')}
+          />
+        </div>
+      )}
+
+      {/* RENDER VIEW 2: DEDICATED DOCUMENTATION VIEW */}
+      {lobbyMode === 'docs' && (
+        <div className="flex-1 overflow-y-auto">
+          <DocsView
+            onBackToApp={() => setLobbyMode('meeting')}
+            onOpenDevPlayground={() => setLobbyMode('dev')}
+          />
+        </div>
+      )}
+
+      {/* RENDER VIEW 3: STANDARD MEETING / STREAM LOBBY */}
+      {(lobbyMode === 'meeting' || lobbyMode === 'stream') && (
+        <main className="w-full max-w-7xl mx-auto px-6 py-8 my-auto grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-center">
+          {/* Left: VideoMeet Action & Typography */}
+          <div className="lg:col-span-6 flex flex-col gap-6 sm:gap-8">
+            {/* Mode Switcher Tabs: Meeting vs Stream */}
+            <div className="inline-flex p-1 rounded-xl bg-[#28292c] border border-[#3c4043]/70 self-start max-w-full">
+              <button
+                onClick={() => setLobbyMode('meeting')}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                  lobbyMode === 'meeting'
+                    ? 'bg-[#1a73e8] text-white shadow-sm'
+                    : 'text-[#9aa0a6] hover:text-white'
+                }`}
+              >
+                <Video className="w-3.5 h-3.5" />
+                <span>Reunião de Vídeo</span>
+              </button>
+              <button
+                onClick={() => setLobbyMode('stream')}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                  lobbyMode === 'stream'
+                    ? 'bg-[#1a73e8] text-white shadow-sm'
+                    : 'text-[#9aa0a6] hover:text-white'
+                }`}
+              >
+                <Radio className="w-3.5 h-3.5" />
+                <span>Transmissão & Pareamento</span>
+              </button>
+            </div>
 
           <div className="flex flex-col gap-3">
             <h1 className="text-3xl sm:text-4xl lg:text-[42px] font-normal leading-[1.15] text-[#e8eaed] tracking-tight">
@@ -805,6 +883,7 @@ export const Lobby: React.FC<LobbyProps> = ({
           <span className="text-xs text-[#9aa0a6] mt-3">Verifique seu áudio e vídeo antes de entrar</span>
         </div>
       </main>
+      )}
 
       {/* VideoMeet Minimal Footer */}
       <footer className="w-full px-6 py-4 flex items-center justify-between text-xs text-[#9aa0a6] border-t border-[#3c4043]/30">
