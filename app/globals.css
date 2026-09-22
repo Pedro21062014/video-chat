@@ -99,6 +99,10 @@
   }
 }
 
+.animate-shimmer {
+  animation: shimmer 2s infinite ease-in-out;
+}
+
 /* Google Meet Style Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
