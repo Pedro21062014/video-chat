@@ -460,6 +460,26 @@ export const DocsView: React.FC<DocsViewProps> = ({
                     <td className="py-3 px-4 text-white">360p | 720p | 1080p | 4k</td>
                     <td className="py-3 px-4 text-[#9aa0a6] font-sans">Resolução alvo do vídeo WebRTC</td>
                   </tr>
+                  <tr className="hover:bg-[#161820]">
+                    <td className="py-3 px-4 text-[#8ab4f8] font-bold">clean</td>
+                    <td className="py-3 px-4 text-white">true | false</td>
+                    <td className="py-3 px-4 text-[#9aa0a6] font-sans">Modo Limpo: exibe apenas o vídeo puro sem botões nem barras</td>
+                  </tr>
+                  <tr className="hover:bg-[#161820]">
+                    <td className="py-3 px-4 text-[#8ab4f8] font-bold">controls</td>
+                    <td className="py-3 px-4 text-white">none | all | lista</td>
+                    <td className="py-3 px-4 text-[#9aa0a6] font-sans">Oculta todos os botões (none) ou exibe botões específicos</td>
+                  </tr>
+                  <tr className="hover:bg-[#161820]">
+                    <td className="py-3 px-4 text-[#8ab4f8] font-bold">buttons</td>
+                    <td className="py-3 px-4 text-white">audio,video,quality...</td>
+                    <td className="py-3 px-4 text-[#9aa0a6] font-sans">Lista granular de botões permitidos na interface</td>
+                  </tr>
+                  <tr className="hover:bg-[#161820]">
+                    <td className="py-3 px-4 text-[#8ab4f8] font-bold">header</td>
+                    <td className="py-3 px-4 text-white">true | false</td>
+                    <td className="py-3 px-4 text-[#9aa0a6] font-sans">Exibe ou oculta o cabeçalho superior (título e link de compartilhamento)</td>
+                  </tr>
                 </tbody>
               </table>
             </div>
@@ -471,22 +491,50 @@ export const DocsView: React.FC<DocsViewProps> = ({
           <section id="ai" className="flex flex-col gap-4 scroll-mt-24">
             <div className="flex items-center gap-2 text-purple-400">
               <Sparkles className="w-5 h-5" />
-              <span className="text-xs font-semibold uppercase tracking-wider">7. Guia para IAs (llms.txt)</span>
+              <span className="text-xs font-semibold uppercase tracking-wider">7. Guia para IAs (llms.txt & docs.txt)</span>
             </div>
             <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
               Prompt para ChatGPT, Claude, Gemini & Cursor
             </h2>
 
-            <div className="bg-[#1b1926] p-5 rounded-2xl border border-purple-500/20 flex flex-col gap-3">
+            <div className="bg-[#1b1926] p-5 rounded-2xl border border-purple-500/20 flex flex-col gap-4">
               <p className="text-xs text-purple-200">
-                Copie o prompt abaixo e envie para seu assistente de IA gerar o código de integração do VideoMeet automaticamente no seu projeto:
+                Você pode passar o link raw do repositório diretamente para agentes de IA para entenderem toda a API do VideoMeet:
               </p>
+
+              <div className="flex flex-col sm:flex-row items-center gap-2">
+                <a
+                  href="https://github.com/Pedro21062014/video-chat/raw/refs/heads/main/public/llms.txt"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full sm:w-auto flex items-center justify-between gap-2 bg-[#252136] hover:bg-[#312c47] text-purple-200 text-xs px-3.5 py-2 rounded-xl border border-purple-500/30 transition-colors"
+                >
+                  <div className="flex items-center gap-2 font-mono">
+                    <FileText className="w-3.5 h-3.5 text-purple-400" />
+                    <span>llms.txt (GitHub Raw)</span>
+                  </div>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+
+                <a
+                  href="https://raw.githubusercontent.com/Pedro21062014/video-chat/refs/heads/main/public/docs.txt"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full sm:w-auto flex items-center justify-between gap-2 bg-[#252136] hover:bg-[#312c47] text-purple-200 text-xs px-3.5 py-2 rounded-xl border border-purple-500/30 transition-colors"
+                >
+                  <div className="flex items-center gap-2 font-mono">
+                    <FileText className="w-3.5 h-3.5 text-[#8ab4f8]" />
+                    <span>docs.txt (GitHub Raw)</span>
+                  </div>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
 
               <div className="relative bg-[#0e0c16] p-4 rounded-xl border border-purple-500/30 text-xs font-mono text-purple-200">
                 <button
                   onClick={() =>
                     copyToClipboard(
-                      `Você é um desenvolvedor frontend. Integre o player de vídeo gratuito VideoMeet no meu app usando o iframe:\n<iframe src="${baseUrl}/?mode=stream&role=viewer&room={MEU_CODIGO}&embed=true" width="100%" height="480" allow="camera; microphone; display-capture; autoplay" allowfullscreen style="border:0; border-radius:12px;"></iframe>`,
+                      `Você é um desenvolvedor frontend. Consulte a documentação técnica oficial em https://raw.githubusercontent.com/Pedro21062014/video-chat/refs/heads/main/public/docs.txt e integre o player de vídeo gratuito VideoMeet no meu app usando o iframe:\n<iframe src="${baseUrl}/?mode=stream&role=viewer&room={MEU_CODIGO}&embed=true" width="100%" height="480" allow="camera; microphone; display-capture; autoplay" allowfullscreen style="border:0; border-radius:12px;"></iframe>`,
                       'ai_prompt'
                     )
                   }
@@ -496,7 +544,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
                   <span>{copiedKey === 'ai_prompt' ? 'Copiado!' : 'Copiar Prompt'}</span>
                 </button>
                 <pre className="whitespace-pre-wrap leading-relaxed pr-24">
-{`Você é um desenvolvedor frontend. Integre o player de vídeo gratuito VideoMeet no meu app usando o iframe:
+{`Você é um desenvolvedor frontend. Consulte a documentação em https://raw.githubusercontent.com/Pedro21062014/video-chat/refs/heads/main/public/docs.txt e integre o player de vídeo gratuito VideoMeet no meu app:
 <iframe 
   src="${baseUrl}/?mode=stream&role=viewer&room={MEU_CODIGO}&embed=true" 
   width="100%" 

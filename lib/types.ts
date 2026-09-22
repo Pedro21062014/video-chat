@@ -164,4 +164,23 @@ export interface StreamSessionInfo {
   isEmbed?: boolean;
 }
 
+export interface StreamControlsOptions {
+  mode?: 'all' | 'none' | 'custom';
+  showHeader?: boolean;
+  showToolbar?: boolean;
+  audio?: boolean;
+  video?: boolean;
+  screenShare?: boolean;
+  switchCamera?: boolean;
+  quality?: boolean;
+  fullscreen?: boolean;
+  pip?: boolean;
+  leave?: boolean;
+  copyCode?: boolean;
+  copyLink?: boolean;
+  docs?: boolean;
+  statusBadge?: boolean;
+}
+
+
 

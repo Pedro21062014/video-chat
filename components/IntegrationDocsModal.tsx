@@ -124,13 +124,13 @@ allow="camera; microphone; display-capture; autoplay"`;
             </a>
 
             <a
-              href="/docs.txt"
+              href="https://raw.githubusercontent.com/Pedro21062014/video-chat/refs/heads/main/public/docs.txt"
               target="_blank"
               rel="noopener noreferrer"
               className="hidden md:flex items-center gap-1.5 text-xs text-[#8ab4f8] hover:text-[#aecbfa] bg-[#272a32] px-3 py-1.5 rounded-lg border border-[#383d47] transition-colors"
             >
               <FileText className="w-3.5 h-3.5" />
-              <span>TXT para IA (/docs.txt)</span>
+              <span>TXT para IA (docs.txt)</span>
             </a>
 
             <button
@@ -304,7 +304,7 @@ allow="camera; microphone; display-capture; autoplay"`;
                   <button
                     onClick={() =>
                       copyToClipboard(
-                        `<!-- Inclua o SDK no seu site -->\n<script src="${baseUrl}/videomeet-sdk.js"></script>\n\n<div id="camera-stream" style="width: 100%; height: 450px;"></div>\n\n<script>\n  // Gera e inicializa o receptor pareado instantaneamente\n  VideoMeet.embed({\n    container: '#camera-stream',\n    mode: 'stream',\n    role: 'viewer',\n    room: '${cleanCode}',\n    baseUrl: '${baseUrl}'\n  });\n</script>`,
+                        `<!-- Inclua o SDK no seu site -->\n<script src="${baseUrl}/videomeet-sdk.js"></script>\n\n<div id="camera-stream" style="width: 100%; height: 450px;"></div>\n\n<script>\n  // Exemplo 1: Modo Limpo (apenas o vídeo puro, sem botões)\n  const viewer = VideoMeet.createViewer({\n    container: '#camera-stream',\n    roomCode: '${cleanCode}',\n    baseUrl: '${baseUrl}',\n    controls: 'none'\n  });\n\n  // Exemplo 2: Personalizar botões visíveis\n  // const transmitter = VideoMeet.createSender({\n  //   container: '#camera-stream',\n  //   roomCode: '${cleanCode}',\n  //   buttons: ['audio', 'video', 'quality'],\n  //   header: false\n  // });\n</script>`,
                         'js_sdk'
                       )
                     }
@@ -324,13 +324,19 @@ allow="camera; microphone; display-capture; autoplay"`;
 <div id="camera-stream" style="width: 100%; height: 450px;"></div>
 
 <script>
-  VideoMeet.embed({
+  // Inicialização com Modo Limpo (Sem nenhum botão)
+  const viewer = VideoMeet.createViewer({
     container: '#camera-stream',
-    mode: 'stream',
-    role: 'viewer',
-    room: '${cleanCode}',
-    baseUrl: '${baseUrl}'
+    roomCode: '${cleanCode}',
+    baseUrl: '${baseUrl}',
+    controls: 'none' // 'none' para apenas vídeo puro
   });
+
+  // Ou escolha botões específicos:
+  // VideoMeet.createSender({
+  //   roomCode: '${cleanCode}',
+  //   buttons: ['audio', 'video', 'quality', 'fullscreen']
+  // });
 </script>`}
                   </pre>
                 </div>
@@ -513,12 +519,13 @@ allow="camera; microphone; display-capture; autoplay"`;
 
                 <div className="flex items-center gap-2">
                   <a
-                    href="/docs.txt"
+                    href="https://raw.githubusercontent.com/Pedro21062014/video-chat/refs/heads/main/public/docs.txt"
                     target="_blank"
+                    rel="noopener noreferrer"
                     className="flex items-center gap-1.5 bg-[#2a2636] hover:bg-[#373248] text-purple-200 px-3 py-1.5 rounded-lg border border-purple-500/30 text-xs transition-colors"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Abrir /docs.txt</span>
+                    <span>docs.txt (GitHub Raw)</span>
                   </a>
 
                   <button

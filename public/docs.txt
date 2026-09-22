@@ -1,57 +1,86 @@
 # ==============================================================================
 # VIDEOMEET - DOCUMENTAÇÃO TÉCNICA E GUIA DE INTEGRAÇÃO (LLMS & DEVELOPERS)
-# Versão: 2.1.0 | Protocolo: WebRTC P2P (Sem servidor de mídia pago / 100% Gratuito)
+# Versão: 2.2.0 | Protocolo: WebRTC P2P (Sem servidor de mídia pago / 100% Gratuito)
 # Formato: Texto Puro (Markdown Plaintext para consumo por IA e Agentes)
 # ==============================================================================
 
 ## 1. VISÃO GERAL DA ARQUITETURA
 O VideoMeet é uma plataforma e SDK de videoconferência e transmissão de vídeo WebRTC
 Peer-to-Peer (P2P). A sinalização (SDP Offers/Answers e ICE Candidates) é gerenciada
-de forma serverless e sem custos de infraestrutura.
+em tempo real sem custos de infraestrutura e com latência ultrabaixa (<200ms).
 
 A plataforma suporta dois modos operacionais principais:
-1. TRANSMISSÃO PURA (Modo Stream / Pareamento via Código):
+1. TRANSMISSÃO PURA (Modo Stream / Pareamento de Câmera e Tela):
    - Transmissor (Sender): Capta a câmera ou tela local e transmite diretamente para o receptor.
-   - Receptor (Viewer): Recebe o streaming P2P em tempo real com baixa latência (<200ms).
-   - Ideal para: Câmeras de segurança, babá eletrônica, compartilhamento de tela de suporte, monitoramento, etc.
+   - Receptor (Viewer): Recebe o streaming P2P em tempo real com baixa latência.
+   - Suporte a Modo Limpo (sem botões) e Controle Granular de Interface (escolher botões visíveis).
+   - Ideal para: Câmeras de segurança, monitoramento, babá eletrônica, suporte remoto, live streams e IoT.
 
 2. SALA DE REUNIÃO COMPLETA (Modo Meeting):
-   - Grade adaptativa de participantes (desktop bento grid ou visualização estilo WhatsApp mobile com PIP arrastável).
-   - Chat em tempo real, reações de emoji flutuantes, levantar a mão, controle de microfone/câmera, seleção de qualidade (360p, 720p HD, 1080p Full HD) e compartilhamento de tela com ícone MonitorUp.
+   - Grade adaptativa de participantes (desktop bento grid ou visualização WhatsApp mobile com PIP arrastável).
+   - Chat em tempo real, reações de emoji flutuantes, levantar a mão, controle de áudio/vídeo, seleção de qualidade (144p até 4K) e compartilhamento de tela com ícone MonitorUp.
 
 ---
 
 ## 2. MODOS DE INTEGRAÇÃO VIA URL (IFRAME & POPUP)
 
-A integração mais rápida é feita via URL embedding em um <iframe> ou nova janela.
+A integração é feita via URL embedding em um <iframe> ou SDK JavaScript.
 
 ### 2.1. Parâmetros de Query String Suportados
 
 | Parâmetro | Valores Possíveis | Padrão | Descrição |
 |---|---|---|---|
-| `mode` | `stream` \| `meeting` | `meeting` | Define se a sessão é apenas transmissão P2P ou reunião completa. |
-| `role` | `sender` \| `viewer` | `sender` | (Apenas em `mode=stream`): `sender` para transmitir; `viewer` para assistir. |
+| `mode` | `stream` \| `meeting` | `meeting` | Define se a sessão é transmissão P2P (`stream`) ou reunião (`meeting`). |
+| `role` | `sender` \| `viewer` | `sender` | Em `mode=stream`: `sender` para transmitir câmera; `viewer` para assistir. |
 | `room` | string (ex: `cam-101`, `abc-defg-hij`) | aleatório | O código da sala ou identificador de pareamento. |
+| `controls` | `none` \| `all` \| `clean` \| lista (ex: `audio,video`) | `all` | Controla os botões visíveis ou oculta todos (`controls=none`). |
+| `buttons` | lista separada por vírgula (ex: `audio,video,quality,fullscreen`) | `all` | Escolhe exatamente quais botões exibir na barra de ferramentas. |
+| `clean` | `true` \| `false` | `false` | Se `true`, ativa o MODO LIMPO: apenas o vídeo puro sem nenhum botão ou cabeçalho. |
+| `header` | `true` \| `false` | `true` | Exibe ou oculta o cabeçalho superior (código da sala, link, docs). |
+| `toolbar` | `true` \| `false` | `true` | Exibe ou oculta a barra inferior de controles. |
 | `name` | string (ex: `Carlos`, `Camera Sala`) | `Convidado` | Nome exibido no tile de vídeo e chat. |
-| `embed` | `true` \| `false` | `false` | Remove cabeçalhos e otimiza o layout para exibição embutida/iframe. |
+| `embed` | `true` \| `false` | `false` | Remove margens e otimiza o layout para exibição embutida/iframe. |
 | `audio` | `true` \| `false` | `true` | Estado inicial do microfone (`false` = mudo). |
 | `video` | `true` \| `false` | `true` | Estado inicial da câmera (`false` = câmera desligada). |
-| `quality` | `360p` \| `720p` \| `1080p` | `720p` | Resolução e taxa de quadros padrão do transmissor. |
+| `quality` | `144p` \| `240p` \| `360p` \| `480p` \| `720p` \| `1080p` \| `4k` | `720p` | Resolução e taxa de quadros padrão do transmissor. |
+
+### 2.2. Botões Disponíveis para Seleção no Parâmetro `buttons`:
+- `audio`: Botão de mutar/desmutar microfone (ou som no viewer).
+- `video`: Botão de ligar/desligar câmera.
+- `switchcamera`: Botão de alternar câmera frontal/traseira (se houver múltiplas).
+- `screenshare`: Botão de compartilhar tela.
+- `quality`: Seletor de qualidade (144p até 4K).
+- `fullscreen`: Botão de alternar tela cheia.
+- `pip`: Botão de Picture-in-Picture.
+- `leave`: Botão vermelho de encerrar ou sair da transmissão.
+- `status`: Indicador de status/qualidade WebRTC P2P.
+- `copycode`: Botão de copiar código no cabeçalho.
+- `copylink`: Botão de copiar link do receptor.
+- `docs`: Botão de abrir modal de documentação.
 
 ---
 
 ## 3. EXEMPLOS PRÁTICOS DE URLS
 
-Assuma `https://videomeet.app` (ou o domínio onde o aplicativo estiver rodando):
+### A) Modo Limpo - Transmissão 100% Pura sem Botões (Clean Stream):
+```text
+https://SEU_DOMINIO/?mode=stream&role=viewer&room=sala-01&clean=true&embed=true
+```
 
-### A) Transmitir a câmera de um celular ou dispositivo (Transmissor):
-https://SEU_DOMINIO/?mode=stream&role=sender&room=sala-402&embed=true
+### B) Transmissão de Câmera com Apenas Botão de Áudio e Vídeo:
+```text
+https://SEU_DOMINIO/?mode=stream&role=sender&room=sala-01&buttons=audio,video&header=false&embed=true
+```
 
-### B) Exibir o vídeo da câmera em outro site/dashboard (Receptor):
-https://SEU_DOMINIO/?mode=stream&role=viewer&room=sala-402&embed=true
+### C) Receptor de Câmera com Apenas Botão de Som e Tela Cheia:
+```text
+https://SEU_DOMINIO/?mode=stream&role=viewer&room=sala-01&buttons=audio,fullscreen&header=false&embed=true
+```
 
-### C) Incorporar uma Reunião Completa de Vídeo:
+### D) Reunião Completa:
+```text
 https://SEU_DOMINIO/?room=reuniao-equipe&name=João&embed=true
+```
 
 ---
 
@@ -59,19 +88,19 @@ https://SEU_DOMINIO/?room=reuniao-equipe&name=João&embed=true
 
 ### 4.1. Código HTML Básico (Iframe Simples)
 ```html
-<!-- Exemplo 1: Receptor de Transmissão de Câmera -->
+<!-- Exemplo 1: Receptor de Transmissão Modo Limpo (Sem Botões) -->
 <iframe
-  src="https://SEU_DOMINIO/?mode=stream&role=viewer&room=camera-sala-01&embed=true"
+  src="https://SEU_DOMINIO/?mode=stream&role=viewer&room=camera-sala-01&clean=true&embed=true"
   width="100%"
   height="480"
   style="border: 0; border-radius: 12px; background: #000;"
-  allow="camera; microphone; display-capture; autoplay"
+  allow="camera; microphone; display-capture; autoplay; clipboard-write; fullscreen"
   allowfullscreen
 ></iframe>
 
-<!-- Exemplo 2: Transmissor de Câmera -->
+<!-- Exemplo 2: Transmissor de Câmera com Botões Selecionados -->
 <iframe
-  src="https://SEU_DOMINIO/?mode=stream&role=sender&room=camera-sala-01&embed=true"
+  src="https://SEU_DOMINIO/?mode=stream&role=sender&room=camera-sala-01&buttons=audio,video,quality&embed=true"
   width="100%"
   height="480"
   style="border: 0; border-radius: 12px; background: #000;"
@@ -80,25 +109,34 @@ https://SEU_DOMINIO/?room=reuniao-equipe&name=João&embed=true
 ></iframe>
 ```
 
-### 4.2. Componente React / Next.js
+### 4.2. Componente React / Next.js com Opção de Controles
 ```tsx
 import React from 'react';
 
 interface StreamViewerProps {
   roomCode: string;
+  cleanMode?: boolean;
+  buttons?: string[];
   baseUrl?: string;
 }
 
-export function StreamViewer({ roomCode, baseUrl = window.location.origin }: StreamViewerProps) {
-  const streamUrl = `${baseUrl}/?mode=stream&role=viewer&room=${encodeURIComponent(roomCode)}&embed=true`;
+export function StreamViewer({
+  roomCode,
+  cleanMode = false,
+  buttons,
+  baseUrl = typeof window !== 'undefined' ? window.location.origin : '',
+}: StreamViewerProps) {
+  const buttonsQuery = buttons ? `&buttons=${buttons.join(',')}` : '';
+  const cleanQuery = cleanMode ? '&clean=true' : '';
+  const streamUrl = `${baseUrl}/?mode=stream&role=viewer&room=${encodeURIComponent(roomCode)}&embed=true${cleanQuery}${buttonsQuery}`;
 
   return (
     <div className="w-full aspect-video rounded-xl overflow-hidden shadow-2xl bg-black border border-neutral-800">
       <iframe
         src={streamUrl}
-        title={`Transmissão do canal ${roomCode}`}
+        title={`Transmissão ${roomCode}`}
         className="w-full h-full border-0"
-        allow="camera; microphone; display-capture; autoplay"
+        allow="camera; microphone; display-capture; autoplay; fullscreen"
         allowFullScreen
       />
     </div>
@@ -106,8 +144,7 @@ export function StreamViewer({ roomCode, baseUrl = window.location.origin }: Str
 }
 ```
 
-### 4.3. Utilizando o SDK JavaScript Embutido (`videomeet-sdk.js`)
-O script está disponível em `/videomeet-sdk.js`.
+### 4.3. Utilizando o SDK JavaScript (`videomeet-sdk.js`)
 
 ```html
 <script src="https://SEU_DOMINIO/videomeet-sdk.js"></script>
@@ -115,64 +152,19 @@ O script está disponível em `/videomeet-sdk.js`.
 <div id="video-container" style="width: 100%; height: 500px;"></div>
 
 <script>
-  // 1. Criar uma sessão programaticamente
-  const session = VideoMeet.createSession({
-    mode: 'stream',     // 'stream' ou 'meeting'
-    role: 'viewer',     // 'sender' ou 'viewer'
-    room: 'canal-456',
-    embed: true,
-    audio: true,
-    video: true
+  // Exemplo A: Criar Transmissor em Modo Limpo (Apenas a transmissão, sem botões)
+  const transmitter = VideoMeet.createSender({
+    container: '#video-container',
+    roomCode: 'minha-camera-01',
+    clean: true
   });
 
-  console.log('URL da Sessão:', session.url);
-  console.log('Código da Sala:', session.roomCode);
-
-  // 2. Incorporar automaticamente no elemento HTML
-  VideoMeet.embed({
+  // Exemplo B: Criar Receptor com Botões Específicos
+  const viewer = VideoMeet.createViewer({
     container: '#video-container',
-    mode: 'stream',
-    role: 'viewer',
-    room: 'canal-456',
-    width: '100%',
-    height: '100%'
+    roomCode: 'minha-camera-01',
+    buttons: ['audio', 'fullscreen', 'pip'],
+    header: false
   });
 </script>
 ```
-
----
-
-## 5. PERMISSÕES E POLÍTICAS DE NAVEGADOR (CRÍTICO)
-
-1. **Atributo `allow` do Iframe**:
-   Os iframes DEVEM conter obrigatoriamente:
-   `allow="camera; microphone; display-capture; autoplay"`
-   Sem isso, o navegador bloqueará o acesso aos dispositivos de mídia.
-
-2. **Políticas de Autoplay com Áudio**:
-   Navegadores modernos (Chrome, Safari, Firefox, Edge) bloqueiam a reprodução
-   automática de áudio se não houver interação prévia do usuário na página.
-   O VideoMeet trata isso automaticamente iniciando o vídeo mudo e exibindo
-   um botão acessível de "Ativar Som" quando necessário.
-
-3. **Protocolo HTTPS**:
-   O WebRTC exige HTTPS (ou `http://localhost` para desenvolvimento). Ambientes HTTP
-   não seguros não possuem acesso às APIs `navigator.mediaDevices`.
-
----
-
-## 6. SINALIZAÇÃO WEBRTC & CICLO DE VIDA
-- As salas armazenam ofertas (SDP Offer), respostas (SDP Answer) e candidatos ICE.
-- Quando uma aba é fechada ou o usuário clica em "Sair", os eventos de limpeza (`beforeunload`, `pagehide`)
-  removem o registro do participante, garantindo que ninguém fique "preso" como fantasma.
-- O organizador tem a opção de "Encerrar chamada para todos", que limpa todos os canais e
-  desconecta imediatamente todos os participantes da sessão.
-
----
-
-## 7. RESUMO DE ENDPOINTS ESTÁTICOS
-- Documentação completa em TXT: `/docs.txt` e `/llms.txt`
-- SDK JavaScript pronto para uso: `/videomeet-sdk.js`
-- Aplicação Web: `/` (com suporte aos parâmetros de query string descritos)
-
-==============================================================================

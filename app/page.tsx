@@ -23,6 +23,7 @@ import {
   NetworkStatsInfo,
   AppMode,
   StreamRole,
+  StreamControlsOptions,
 } from '@/lib/types';
 import { PeerConnectionManager } from '@/lib/webrtc';
 import { sound } from '@/lib/sound';
@@ -104,6 +105,7 @@ export default function MeetingApp() {
   // Video Quality & Camera Settings
   const [videoQuality, setVideoQuality] = useState<VideoQualityId>('720p');
   const [isCameraSettingsOpen, setIsCameraSettingsOpen] = useState(false);
+  const [streamControlsOptions, setStreamControlsOptions] = useState<StreamControlsOptions>({});
   const meetingStartTimeRef = useRef<number>(0);
 
   // Media Streams
@@ -211,6 +213,11 @@ export default function MeetingApp() {
       const queryAudio = params.get('audio');
       const queryVideo = params.get('video');
       const queryQuality = params.get('quality') as VideoQualityId;
+      const queryControls = (params.get('controls') || '').toLowerCase().trim();
+      const queryButtons = (params.get('buttons') || '').toLowerCase().trim();
+      const queryHeader = (params.get('header') || '').toLowerCase().trim();
+      const queryToolbar = (params.get('toolbar') || '').toLowerCase().trim();
+      const queryClean = (params.get('clean') || '').toLowerCase().trim();
 
       const initTimer = setTimeout(() => {
         if (queryMode === 'stream' || queryMode === 'meeting') {
@@ -234,6 +241,57 @@ export default function MeetingApp() {
         if (queryVideo === '0' || queryVideo === 'false') {
           setIsVideoMuted(true);
         }
+
+        // Configure granular stream controls & clean mode
+        const controlsOpt: StreamControlsOptions = {};
+        if (
+          queryControls === 'none' ||
+          queryControls === 'false' ||
+          queryControls === '0' ||
+          queryClean === 'true' ||
+          queryClean === '1' ||
+          queryButtons === 'none'
+        ) {
+          controlsOpt.mode = 'none';
+          controlsOpt.showHeader = false;
+          controlsOpt.showToolbar = false;
+        } else {
+          if (queryHeader === 'false' || queryHeader === '0') {
+            controlsOpt.showHeader = false;
+          }
+          if (queryToolbar === 'false' || queryToolbar === '0') {
+            controlsOpt.showToolbar = false;
+          }
+
+          const buttonsParam =
+            queryButtons ||
+            (queryControls && !['all', 'true', '1'].includes(queryControls) ? queryControls : '');
+          if (buttonsParam) {
+            const list = buttonsParam.split(',').map((s) => s.trim().toLowerCase());
+            controlsOpt.mode = 'custom';
+            controlsOpt.audio = list.includes('audio') || list.includes('mic');
+            controlsOpt.video =
+              list.includes('video') || list.includes('cam') || list.includes('camera');
+            controlsOpt.switchCamera =
+              list.includes('switchcamera') ||
+              list.includes('switch_camera') ||
+              list.includes('switch');
+            controlsOpt.screenShare =
+              list.includes('screenshare') || list.includes('screen') || list.includes('tela');
+            controlsOpt.quality = list.includes('quality') || list.includes('qualidade');
+            controlsOpt.fullscreen = list.includes('fullscreen') || list.includes('fs');
+            controlsOpt.pip = list.includes('pip');
+            controlsOpt.leave =
+              list.includes('leave') || list.includes('sair') || list.includes('hangup');
+            controlsOpt.copyCode =
+              list.includes('copycode') || list.includes('copy_code') || list.includes('code');
+            controlsOpt.copyLink =
+              list.includes('copylink') || list.includes('copy_link') || list.includes('link');
+            controlsOpt.docs = list.includes('docs') || list.includes('api');
+            controlsOpt.statusBadge = list.includes('status') || list.includes('badge');
+          }
+        }
+        setStreamControlsOptions(controlsOpt);
 
         if (queryRoom) {
           setRoomId(queryRoom);
@@ -1379,6 +1437,7 @@ export default function MeetingApp() {
           activeCameraId={activeCameraId}
           videoQuality={videoQuality}
           isEmbed={isEmbedMode}
+          controlsConfig={streamControlsOptions}
           onToggleAudio={handleToggleAudio}
           onToggleVideo={handleToggleVideo}
           onToggleScreenShare={handleToggleScreenShare}

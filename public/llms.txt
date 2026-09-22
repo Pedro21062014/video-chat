@@ -2,24 +2,31 @@
 # Full Documentation URL: /docs.txt
 # JavaScript SDK: /videomeet-sdk.js
 
-> Plataforma P2P WebRTC gratuita de videoconferência, chamadas em grupo e transmissão de câmera isolada via pareamento por código.
+> Plataforma P2P WebRTC gratuita de videoconferência, chamadas em grupo e transmissão de câmera isolada via pareamento por código com suporte a modo limpo e seleção granular de controles.
 
 ## Formato de URLs de Integração
-- Modo Transmissão (Sender - Câmera/Tela): `/?mode=stream&role=sender&room={ROOM_CODE}&embed=true`
-- Modo Receptor (Viewer - Assistir): `/?mode=stream&role=viewer&room={ROOM_CODE}&embed=true`
+- Modo Transmissão Padrão (Sender): `/?mode=stream&role=sender&room={ROOM_CODE}&embed=true`
+- Modo Receptor Padrão (Viewer): `/?mode=stream&role=viewer&room={ROOM_CODE}&embed=true`
+- Modo Limpo (Apenas o vídeo, sem botões): `/?mode=stream&role=viewer&room={ROOM_CODE}&clean=true&embed=true`
+- Modo com Botões Selecionados: `/?mode=stream&role=sender&room={ROOM_CODE}&buttons=audio,video,quality&embed=true`
 - Modo Reunião Completa: `/?room={ROOM_CODE}&name={USER_NAME}&embed=true`
 
 ## Parâmetros Suportados
 - `mode`: 'stream' | 'meeting' (padrão: 'meeting')
 - `role`: 'sender' | 'viewer' (padrão: 'sender')
 - `room`: string com código da sala
+- `clean`: 'true' | 'false' (modo limpo sem nenhum botão ou cabeçalho)
+- `controls`: 'none' | 'all' | lista de botões separados por vírgula
+- `buttons`: lista de botões separados por vírgula ('audio', 'video', 'switchcamera', 'screenshare', 'quality', 'fullscreen', 'pip', 'leave')
+- `header`: 'true' | 'false' (exibe/oculta barra de topo)
+- `toolbar`: 'true' | 'false' (exibe/oculta barra inferior de controles)
 - `name`: string com nome do usuário
-- `embed`: 'true' | 'false' (remove cabeçalhos externos para iframes)
+- `embed`: 'true' | 'false' (otimiza para iframes)
 - `audio`: 'true' | 'false' (estado inicial do mic)
 - `video`: 'true' | 'false' (estado inicial da câmera)
-- `quality`: '360p' | '720p' | '1080p' (qualidade do streaming)
+- `quality`: '144p' | '240p' | '360p' | '480p' | '720p' | '1080p' | '4k'
 
-## Iframe Obrigatório
-allow="camera; microphone; display-capture; autoplay"
+## Iframe Permissions
+allow="camera; microphone; display-capture; autoplay; clipboard-write; fullscreen"
 
 Para a documentação completa detalhada em formato texto, acesse /docs.txt

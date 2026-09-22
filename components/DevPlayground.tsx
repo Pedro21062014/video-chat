@@ -9,7 +9,6 @@ import {
   MicOff,
   SwitchCamera,
   Play,
-  Square,
   Copy,
   Check,
   RefreshCw,
@@ -17,29 +16,28 @@ import {
   Code2,
   Tv,
   Layers,
-  Settings,
   Radio,
   Sliders,
   Terminal,
   Activity,
-  Maximize2,
-  Minimize2,
   Sparkles,
   ShieldCheck,
   Download,
-  Share2,
   Monitor,
   Volume2,
-  HelpCircle,
   FileText,
-  Smartphone,
-  Eye,
   CheckCircle2,
-  AlertCircle,
   ArrowRight,
+  Wifi,
+  Trash2,
 } from 'lucide-react';
-import { AppMode, StreamRole, VIDEO_QUALITIES, VideoQualityId } from '@/lib/types';
+import { StreamRole, VIDEO_QUALITIES, VideoQualityId } from '@/lib/types';
 import { sound } from '@/lib/sound';
+
+export const DOCS_RAW_URL =
+  'https://raw.githubusercontent.com/Pedro21062014/video-chat/refs/heads/main/public/docs.txt';
+export const LLMS_RAW_URL =
+  'https://github.com/Pedro21062014/video-chat/raw/refs/heads/main/public/llms.txt';
 
 interface DevPlaygroundProps {
   onStartBroadcast?: (
@@ -61,7 +59,7 @@ export const DevPlayground: React.FC<DevPlaygroundProps> = ({
   initialRoomCode,
 }) => {
   // Navigation inside Dev Playground
-  const [activeSubTab, setActiveSubTab] = useState<'broadcast' | 'playground' | 'snippets' | 'sdk'>('broadcast');
+  const [activeSubTab, setActiveSubTab] = useState<'broadcast' | 'console' | 'playground' | 'snippets' | 'sdk'>('broadcast');
 
   // Broadcast Creator State
   const [roomCode, setRoomCode] = useState(() => initialRoomCode || 'dev-stream-01');
@@ -72,6 +70,7 @@ export const DevPlayground: React.FC<DevPlaygroundProps> = ({
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isVideoMuted, setIsVideoMuted] = useState(false);
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
+  const [isPreviewLoaded, setIsPreviewLoaded] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const [cameraError, setCameraError] = useState<string | null>(null);
 
@@ -87,13 +86,49 @@ export const DevPlayground: React.FC<DevPlaygroundProps> = ({
   const [iframeReloadKey, setIframeReloadKey] = useState(0);
 
   // Snippets & Code State
-  const [snippetLanguage, setSnippetLanguage] = useState<'iframe' | 'react' | 'js_sdk' | 'obs' | 'nextjs'>('iframe');
+  const [snippetLanguage, setSnippetLanguage] = useState<'iframe' | 'react' | 'nextjs' | 'js_sdk' | 'obs'>('iframe');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // Granular Controls Configurator for Camera SDK
+  const [controlsMode, setControlsMode] = useState<'all' | 'none' | 'custom'>('all');
+  const [selectedButtons, setSelectedButtons] = useState<{ [key: string]: boolean }>({
+    audio: true,
+    video: true,
+    switchcamera: true,
+    screenshare: true,
+    quality: true,
+    fullscreen: true,
+    pip: true,
+    leave: true,
+    header: true,
+  });
+
+  const toggleButtonOption = (key: string) => {
+    setSelectedButtons((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const getControlsQuery = () => {
+    if (controlsMode === 'none') {
+      return '&controls=none';
+    }
+    if (controlsMode === 'custom') {
+      const activeBtns = Object.entries(selectedButtons)
+        .filter(([k, v]) => v && k !== 'header')
+        .map(([k]) => k);
+      let q = `&buttons=${activeBtns.join(',')}`;
+      if (!selectedButtons.header) {
+        q += '&header=false';
+      }
+      return q;
+    }
+    return '';
+  };
 
   // Live Signaling Logs for Dev console
   const [eventLogs, setEventLogs] = useState<Array<{ time: string; text: string; type: 'info' | 'success' | 'warn' }>>([
-    { time: '12:00:00', text: 'Dev Playground inicializado com sucesso.', type: 'info' },
-    { time: '12:00:01', text: 'Protocolo WebRTC P2P pronto.', type: 'success' },
+    { time: '12:00:00', text: 'Dev Console inicializado com sucesso.', type: 'info' },
+    { time: '12:00:01', text: 'Protocolo WebRTC P2P pronto para negociação.', type: 'success' },
+    { time: '12:00:02', text: 'Servidores STUN públicos ativos (Google STUN).', type: 'info' },
   ]);
 
   const videoPreviewRef = useRef<HTMLVideoElement>(null);
@@ -109,11 +144,16 @@ export const DevPlayground: React.FC<DevPlaygroundProps> = ({
   const senderUrl = `${baseUrl}/?mode=stream&role=sender&room=${cleanRoomCode}&embed=true&quality=${selectedQuality}`;
   const viewerUrl = `${baseUrl}/?mode=stream&role=viewer&room=${cleanRoomCode}&embed=true`;
   const viewerDirectUrl = `${baseUrl}/?mode=stream&role=viewer&room=${cleanRoomCode}`;
-  const meetingUrl = `${baseUrl}/?room=${cleanRoomCode}&embed=true`;
 
   const addLog = (text: string, type: 'info' | 'success' | 'warn' = 'info') => {
     const now = new Date().toLocaleTimeString();
-    setEventLogs((prev) => [{ time: now, text, type }, ...prev.slice(0, 19)]);
+    setEventLogs((prev) => [{ time: now, text, type }, ...prev.slice(0, 29)]);
+  };
+
+  const clearLogs = () => {
+    setEventLogs([
+      { time: new Date().toLocaleTimeString(), text: 'Console de telemetria limpo.', type: 'info' },
+    ]);
   };
 
   const copyText = (text: string, key: string) => {
@@ -137,14 +177,17 @@ export const DevPlayground: React.FC<DevPlaygroundProps> = ({
   // Enumerate cameras
   useEffect(() => {
     let active = true;
-    navigator.mediaDevices?.enumerateDevices().then((devices) => {
-      if (!active) return;
-      const videoInputs = devices.filter((d) => d.kind === 'videoinput');
-      setAvailableCameras(videoInputs);
-      if (videoInputs.length > 0 && !selectedCameraId) {
-        setSelectedCameraId(videoInputs[0].deviceId);
-      }
-    }).catch(() => {});
+    navigator.mediaDevices
+      ?.enumerateDevices()
+      .then((devices) => {
+        if (!active) return;
+        const videoInputs = devices.filter((d) => d.kind === 'videoinput');
+        setAvailableCameras(videoInputs);
+        if (videoInputs.length > 0 && !selectedCameraId) {
+          setSelectedCameraId(videoInputs[0].deviceId);
+        }
+      })
+      .catch(() => {});
 
     return () => {
       active = false;
@@ -164,7 +207,9 @@ export const DevPlayground: React.FC<DevPlaygroundProps> = ({
     if (!audioTrack) return;
 
     try {
-      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioContextClass =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const ctx = new AudioContextClass();
       audioContextRef.current = ctx;
       const analyser = ctx.createAnalyser();
@@ -229,7 +274,6 @@ export const DevPlayground: React.FC<DevPlaygroundProps> = ({
             },
             audio: !isAudioMuted,
           });
-          // Handle screen share end by user
           stream.getVideoTracks()[0].onended = () => {
             setSourceType('camera');
             addLog('Compartilhamento de tela finalizado pelo usuário.', 'info');
@@ -237,8 +281,16 @@ export const DevPlayground: React.FC<DevPlaygroundProps> = ({
           addLog(`Captura de tela iniciada (${targetOpt.label}).`, 'success');
         } else {
           const videoConstraints: MediaTrackConstraints = selectedCameraId
-            ? { deviceId: { exact: selectedCameraId }, width: { ideal: targetOpt.width }, height: { ideal: targetOpt.height } }
-            : { facingMode: 'user', width: { ideal: targetOpt.width }, height: { ideal: targetOpt.height } };
+            ? {
+                deviceId: { exact: selectedCameraId },
+                width: { ideal: targetOpt.width },
+                height: { ideal: targetOpt.height },
+              }
+            : {
+                facingMode: 'user',
+                width: { ideal: targetOpt.width },
+                height: { ideal: targetOpt.height },
+              };
 
           stream = await navigator.mediaDevices.getUserMedia({
             video: videoConstraints,
@@ -278,10 +330,34 @@ export const DevPlayground: React.FC<DevPlaygroundProps> = ({
     const el = videoPreviewRef.current;
     if (!el) return;
     if (previewStream && !isVideoMuted) {
-      el.srcObject = previewStream;
+      if (el.srcObject !== previewStream) {
+        el.srcObject = previewStream;
+      }
+      const handleReady = () => setIsPreviewLoaded(true);
+      el.addEventListener('loadeddata', handleReady);
+      el.addEventListener('playing', handleReady);
+      el.addEventListener('canplay', handleReady);
+
+      if (el.readyState >= 2 && el.videoWidth > 0) {
+        const timer = setTimeout(() => setIsPreviewLoaded(true), 0);
+        return () => {
+          clearTimeout(timer);
+          el.removeEventListener('loadeddata', handleReady);
+          el.removeEventListener('playing', handleReady);
+          el.removeEventListener('canplay', handleReady);
+        };
+      }
+
       el.play().catch(() => {});
+      return () => {
+        el.removeEventListener('loadeddata', handleReady);
+        el.removeEventListener('playing', handleReady);
+        el.removeEventListener('canplay', handleReady);
+      };
     } else {
       el.srcObject = null;
+      const timer = setTimeout(() => setIsPreviewLoaded(false), 0);
+      return () => clearTimeout(timer);
     }
   }, [previewStream, isVideoMuted]);
 
@@ -315,9 +391,23 @@ export const DevPlayground: React.FC<DevPlaygroundProps> = ({
   // Dynamic code generation for active tab
   const getDynamicCodeSnippet = () => {
     const targetRoom = cleanRoomCode || 'meu-canal';
-    const targetViewerUrl = `${baseUrl}/?mode=stream&role=viewer&room=${targetRoom}&embed=true`;
-    const targetSenderUrl = `${baseUrl}/?mode=stream&role=sender&room=${targetRoom}&embed=true&quality=${selectedQuality}`;
-    const targetMeetingUrl = `${baseUrl}/?room=${targetRoom}&embed=true`;
+    const controlsQuery = getControlsQuery();
+    const targetViewerUrl = `${baseUrl}/?mode=stream&role=viewer&room=${targetRoom}&embed=true${controlsQuery}`;
+    const targetSenderUrl = `${baseUrl}/?mode=stream&role=sender&room=${targetRoom}&embed=true&quality=${selectedQuality}${controlsQuery}`;
+
+    // SDK options string
+    let sdkOptionsStr = '';
+    if (controlsMode === 'none') {
+      sdkOptionsStr = `\n    controls: 'none',`;
+    } else if (controlsMode === 'custom') {
+      const activeBtns = Object.entries(selectedButtons)
+        .filter(([k, v]) => v && k !== 'header')
+        .map(([k]) => `'${k}'`);
+      sdkOptionsStr = `\n    buttons: [${activeBtns.join(', ')}],`;
+      if (!selectedButtons.header) {
+        sdkOptionsStr += `\n    header: false,`;
+      }
+    }
 
     switch (snippetLanguage) {
       case 'iframe':
@@ -346,7 +436,7 @@ export const DevPlayground: React.FC<DevPlaygroundProps> = ({
 
 // Componente React para Receptor ou Transmissor P2P
 export function VideoMeetViewer({ roomCode = '${targetRoom}' }: { roomCode?: string }) {
-  const viewerUrl = \`${baseUrl}/?mode=stream&role=viewer&room=\${encodeURIComponent(roomCode)}&embed=true\`;
+  const viewerUrl = \`${baseUrl}/?mode=stream&role=viewer&room=\${encodeURIComponent(roomCode)}&embed=true${controlsQuery}\`;
 
   return (
     <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-neutral-950 border border-neutral-800 shadow-2xl">
@@ -373,7 +463,7 @@ export default function CameraStreamPlayer({
   room?: string;
   quality?: string;
 }) {
-  const streamUrl = \`${baseUrl}/?mode=stream&role=viewer&room=\${room}&quality=\${quality}&embed=true\`;
+  const streamUrl = \`${baseUrl}/?mode=stream&role=viewer&room=\${room}&quality=\${quality}&embed=true${controlsQuery}\`;
 
   return (
     <section className="w-full max-w-4xl mx-auto my-6 p-4 bg-[#14161a] rounded-2xl border border-[#242831]">
@@ -399,15 +489,19 @@ export default function CameraStreamPlayer({
 <div id="meu-player-video" style="width: 100%; height: 500px;"></div>
 
 <script>
-  // Inicialização em 1 linha
-  const player = VideoMeet.createViewer({
+  // Inicialização do Receptor via SDK (1 linha)
+  const viewer = VideoMeet.createViewer({
     container: '#meu-player-video',
     roomCode: '${targetRoom}',
-    baseUrl: '${baseUrl}',
+    baseUrl: '${baseUrl}',${sdkOptionsStr}
     borderRadius: '16px'
   });
 
-  console.log('Player inicializado na sala:', player.roomCode);
+  // Ou para criar um Transmissor de Câmera isolado:
+  // const transmitter = VideoMeet.createSender({
+  //   container: '#meu-player-video',
+  //   roomCode: '${targetRoom}',${sdkOptionsStr}
+  // });
 </script>`;
 
       case 'obs':
@@ -428,484 +522,493 @@ Instruções para OBS Studio:
     sandboxMode === 'stream' ? `&role=${sandboxRole}` : ''
   }&embed=${sandboxEmbed}&audio=${sandboxAudio}&video=${sandboxVideo}&quality=${sandboxQuality}&name=${encodeURIComponent(
     sandboxUserName
-  )}`;
+  )}${getControlsQuery()}`;
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-6 flex flex-col gap-6 text-[#e8eaed] font-sans antialiased">
-      {/* Top Banner: Dev & Playground Title with Quick Actions */}
+      {/* Top Header Bar: Modern Minimalist Dev Console */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-[#2d3139]">
         <div className="flex items-center gap-3.5">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-[#1a73e8] to-[#8ab4f8] flex items-center justify-center text-white shadow-lg">
+          <div className="w-10 h-10 rounded-xl bg-[#1e2028] border border-[#303542] flex items-center justify-center text-[#8ab4f8] shadow-sm">
             <Terminal className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl sm:text-2xl font-semibold text-white tracking-tight">
-                Dev Hub & Camera Sharing Playground
+                Dev Console & Camera Lab
               </h1>
-              <span className="text-[11px] bg-[#1a73e8]/20 text-[#8ab4f8] px-2.5 py-0.5 rounded-full font-medium border border-[#1a73e8]/30">
-                P2P WebRTC Engine
+              <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-md font-mono border border-emerald-500/20">
+                P2P Engine Online
               </span>
             </div>
-            <p className="text-xs sm:text-sm text-[#9aa0a6] mt-0.5">
-              Crie transmissões de câmera, teste em tempo real no sandbox e gere código para Iframe, React e OBS.
+            <p className="text-xs text-[#9aa0a6] mt-0.5">
+              Crie transmissões diretas de câmera, monitore eventos de sinalização e integre via SDK ou Iframe.
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={onOpenDocs}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#282b33] hover:bg-[#323640] text-[#8ab4f8] hover:text-white text-xs font-medium border border-[#373c47] transition-all shadow-sm cursor-pointer"
-          >
-            <FileText className="w-4 h-4" />
-            <span>Documentação Completa</span>
-          </button>
+        {/* Telemetry Status Bar */}
+        <div className="flex items-center gap-2 text-xs">
+          <div className="flex items-center gap-1.5 bg-[#171920] px-3 py-1.5 rounded-lg border border-[#2c303c] text-[#9aa0a6]">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="font-mono text-white">STUN: Google</span>
+          </div>
 
-          <a
-            href="/videomeet-sdk.js"
-            download="videomeet-sdk.js"
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#1a73e8] hover:bg-[#1558b0] text-white text-xs font-medium shadow-md transition-all cursor-pointer"
-          >
-            <Download className="w-4 h-4" />
-            <span>Baixar SDK JS</span>
-          </a>
+          <div className="flex items-center gap-1.5 bg-[#171920] px-3 py-1.5 rounded-lg border border-[#2c303c] text-[#9aa0a6]">
+            <Activity className="w-3.5 h-3.5 text-[#8ab4f8]" />
+            <span className="font-mono text-white">Latência &lt;120ms</span>
+          </div>
+
+          {onOpenDocs && (
+            <button
+              onClick={onOpenDocs}
+              className="flex items-center gap-1.5 bg-[#1a73e8]/20 hover:bg-[#1a73e8]/30 text-[#8ab4f8] hover:text-white px-3 py-1.5 rounded-lg border border-[#1a73e8]/30 transition-colors cursor-pointer"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Ver Docs</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Sub-Navigation Tabs */}
-      <div className="flex items-center gap-1.5 p-1 bg-[#1c1e24] rounded-xl border border-[#2d3139] overflow-x-auto">
+      {/* Sub Navigation Tabs */}
+      <div className="flex items-center gap-2 border-b border-[#2d3139] pb-3 overflow-x-auto">
         <button
           onClick={() => setActiveSubTab('broadcast')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
             activeSubTab === 'broadcast'
-              ? 'bg-[#282b33] text-white shadow-sm border border-[#3b404d]'
-              : 'text-[#9aa0a6] hover:text-white'
+              ? 'bg-[#1a73e8] text-white shadow-sm'
+              : 'text-[#9aa0a6] hover:text-white hover:bg-[#1f222b]'
           }`}
         >
-          <Radio className="w-4 h-4 text-[#8ab4f8]" />
-          <span>1. Criar Transmissão de Câmera</span>
+          <Radio className="w-3.5 h-3.5" />
+          <span>Criador de Câmera</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('console')}
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+            activeSubTab === 'console'
+              ? 'bg-[#1a73e8] text-white shadow-sm'
+              : 'text-[#9aa0a6] hover:text-white hover:bg-[#1f222b]'
+          }`}
+        >
+          <Terminal className="w-3.5 h-3.5" />
+          <span>Console & Logs</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('playground')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
             activeSubTab === 'playground'
-              ? 'bg-[#282b33] text-white shadow-sm border border-[#3b404d]'
-              : 'text-[#9aa0a6] hover:text-white'
+              ? 'bg-[#1a73e8] text-white shadow-sm'
+              : 'text-[#9aa0a6] hover:text-white hover:bg-[#1f222b]'
           }`}
         >
-          <Sliders className="w-4 h-4 text-emerald-400" />
-          <span>2. Playground & Sandbox Interativo</span>
+          <Sliders className="w-3.5 h-3.5" />
+          <span>Sandbox & Split View</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('snippets')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
             activeSubTab === 'snippets'
-              ? 'bg-[#282b33] text-white shadow-sm border border-[#3b404d]'
-              : 'text-[#9aa0a6] hover:text-white'
+              ? 'bg-[#1a73e8] text-white shadow-sm'
+              : 'text-[#9aa0a6] hover:text-white hover:bg-[#1f222b]'
           }`}
         >
-          <Code2 className="w-4 h-4 text-purple-400" />
-          <span>3. Gerador de Código & Snippets</span>
+          <Code2 className="w-3.5 h-3.5" />
+          <span>Snippets de Integração</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('sdk')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
             activeSubTab === 'sdk'
-              ? 'bg-[#282b33] text-white shadow-sm border border-[#3b404d]'
-              : 'text-[#9aa0a6] hover:text-white'
+              ? 'bg-[#1a73e8] text-white shadow-sm'
+              : 'text-[#9aa0a6] hover:text-white hover:bg-[#1f222b]'
           }`}
         >
-          <Sparkles className="w-4 h-4 text-amber-400" />
-          <span>4. SDK JS & Recursos</span>
+          <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+          <span>Recursos & IAs</span>
         </button>
       </div>
 
-      {/* TAB 1: CRIAR TRANSMISSÃO DE CÂMERA */}
+      {/* TAB 1: CRIADOR DE COMPARTILHAMENTO DE CÂMERA */}
       {activeSubTab === 'broadcast' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left Column: Configuration & Controls */}
-          <div className="lg:col-span-5 flex flex-col gap-4 bg-[#181a1f] p-5 sm:p-6 rounded-2xl border border-[#2d3139] shadow-xl">
-            <div className="flex items-center justify-between pb-3 border-b border-[#2d3139]">
-              <div className="flex items-center gap-2">
-                <Settings className="w-4 h-4 text-[#8ab4f8]" />
-                <h2 className="text-sm font-semibold text-white">Configurar Transmissão</h2>
-              </div>
-              <button
-                onClick={generateNewRoomCode}
-                className="text-[11px] text-[#8ab4f8] hover:text-[#aecbfa] flex items-center gap-1 cursor-pointer transition-colors"
-              >
-                <RefreshCw className="w-3 h-3" />
-                <span>Novo Código</span>
-              </button>
-            </div>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Left Column: Camera Preview Box */}
+          <div className="lg:col-span-7 flex flex-col gap-4">
+            <div className="relative aspect-video w-full rounded-2xl overflow-hidden bg-[#0c0d10] border border-[#2d3139] shadow-2xl flex items-center justify-center">
+              {previewStream && !isVideoMuted ? (
+                <>
+                  <video
+                    ref={videoPreviewRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className={`w-full h-full object-cover transition-opacity duration-300 ${
+                      sourceType === 'camera' ? '-scale-x-100' : ''
+                    } ${isPreviewLoaded ? 'opacity-100' : 'opacity-0'}`}
+                  />
+                  {!isPreviewLoaded && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0d0e12] overflow-hidden z-10">
+                      <div className="absolute inset-0 bg-gradient-to-tr from-[#12141c] via-[#171a24] to-[#0d0e12] animate-pulse" />
+                      <div className="relative z-10 flex flex-col items-center justify-center p-4 text-center">
+                        <div className="w-14 h-14 rounded-2xl bg-[#1e212b] border border-[#303646] flex items-center justify-center text-[#8ab4f8] shadow-lg mb-3">
+                          <Radio className="w-6 h-6 animate-pulse text-[#8ab4f8]" />
+                        </div>
+                        <span className="text-xs font-medium text-white">Carregando Câmera Dev...</span>
+                        <span className="text-[11px] text-[#9aa0a6] mt-0.5">Capturando primeiro frame de vídeo</span>
+                        <div className="w-32 h-1 bg-[#1e212b] rounded-full overflow-hidden mt-3 relative">
+                          <div className="absolute inset-0 w-1/2 bg-gradient-to-r from-transparent via-[#8ab4f8] to-transparent animate-[shimmer_1.5s_infinite]" />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="flex flex-col items-center justify-center gap-3 p-6 text-center">
+                  <div className="w-14 h-14 rounded-full bg-[#181a1f] flex items-center justify-center text-[#9aa0a6]">
+                    <VideoOff className="w-7 h-7" />
+                  </div>
+                  <span className="text-sm font-medium text-[#e8eaed]">Vídeo desativado ou sem sinal</span>
+                  <span className="text-xs text-[#9aa0a6]">
+                    {cameraError || 'Ative a câmera ou selecione uma fonte de captura.'}
+                  </span>
+                </div>
+              )}
 
-            {/* Room / Channel Code Input */}
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-[#9aa0a6] font-medium flex items-center justify-between">
-                <span>Código do Canal / Pareamento (ID)</span>
-                <span className="text-[10px] text-[#8ab4f8]">P2P Token</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={roomCode}
-                  onChange={(e) => setRoomCode(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))}
-                  placeholder="ex: camera-estudio-01"
-                  className="flex-1 bg-[#101215] border border-[#3b404d] focus:border-[#8ab4f8] rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white font-mono focus:outline-none transition-colors"
-                />
-                <button
-                  onClick={() => copyText(roomCode, 'code')}
-                  className="p-2.5 bg-[#252830] hover:bg-[#30343f] text-[#9aa0a6] hover:text-white rounded-xl border border-[#3b404d] transition-colors cursor-pointer"
-                  title="Copiar código"
-                >
-                  {copiedKey === 'code' ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-                </button>
+              {/* Status Pill on Top */}
+              <div className="absolute top-3 left-3 flex items-center gap-2 bg-[#000000]/70 backdrop-blur-md px-2.5 py-1 rounded-full text-[11px] font-mono border border-white/10 text-white">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>DEV PREVIEW</span>
+                <span className="text-[#9aa0a6]">|</span>
+                <span className="text-[#8ab4f8]">{selectedQuality.toUpperCase()}</span>
               </div>
-            </div>
 
-            {/* Video Source Selector (Camera vs Screen) */}
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-[#9aa0a6] font-medium">Origem do Vídeo</label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSourceType('camera')}
-                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-medium border transition-all cursor-pointer ${
-                    sourceType === 'camera'
-                      ? 'bg-[#1a73e8]/20 border-[#1a73e8] text-white'
-                      : 'bg-[#101215] border-[#2d3139] text-[#9aa0a6] hover:text-white'
-                  }`}
-                >
-                  <Video className="w-4 h-4 text-[#8ab4f8]" />
-                  <span>Câmera / Webcam</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSourceType('screen')}
-                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-medium border transition-all cursor-pointer ${
-                    sourceType === 'screen'
-                      ? 'bg-[#1a73e8]/20 border-[#1a73e8] text-white'
-                      : 'bg-[#101215] border-[#2d3139] text-[#9aa0a6] hover:text-white'
-                  }`}
-                >
-                  <Monitor className="w-4 h-4 text-purple-400" />
-                  <span>Tela / Janela (OBS)</span>
-                </button>
-              </div>
-            </div>
+              {/* Live Audio Level Meter */}
+              {!isAudioMuted && (
+                <div className="absolute top-3 right-3 flex items-center gap-1.5 bg-[#000000]/70 backdrop-blur-md px-2.5 py-1 rounded-full text-[11px] border border-white/10 text-white">
+                  <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <div className="w-12 h-1.5 bg-[#2d3139] rounded-full overflow-hidden flex items-center">
+                    <div
+                      className="h-full bg-emerald-400 transition-all duration-75"
+                      style={{ width: `${audioLevel}%` }}
+                    />
+                  </div>
+                </div>
+              )}
 
-            {/* Camera Device Dropdown (if camera selected) */}
-            {sourceType === 'camera' && availableCameras.length > 0 && (
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs text-[#9aa0a6] font-medium">Dispositivo de Câmera</label>
-                <select
-                  value={selectedCameraId}
-                  onChange={(e) => setSelectedCameraId(e.target.value)}
-                  className="bg-[#101215] border border-[#3b404d] focus:border-[#8ab4f8] rounded-xl px-3 py-2 text-xs text-white focus:outline-none"
-                >
-                  {availableCameras.map((cam, idx) => (
-                    <option key={cam.deviceId || idx} value={cam.deviceId}>
-                      {cam.label || `Câmera ${idx + 1}`}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {/* Quality & Resolution Selector */}
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-[#9aa0a6] font-medium flex items-center justify-between">
-                <span>Qualidade de Transmissão</span>
-                <span className="text-[10px] text-emerald-400 font-mono">
-                  {VIDEO_QUALITIES.find((q) => q.id === selectedQuality)?.resolution}
-                </span>
-              </label>
-              <div className="grid grid-cols-4 gap-1.5">
-                {VIDEO_QUALITIES.slice(0, 4).map((q) => (
+              {/* Bottom Preview Controls Overlay */}
+              <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between bg-[#000000]/80 backdrop-blur-md p-2 rounded-xl border border-white/10">
+                <div className="flex items-center gap-2">
                   <button
-                    key={q.id}
-                    type="button"
-                    onClick={() => setSelectedQuality(q.id)}
-                    className={`py-2 px-1 text-center rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                      selectedQuality === q.id
-                        ? 'bg-[#1a73e8] text-white shadow-sm font-semibold'
-                        : 'bg-[#101215] text-[#9aa0a6] hover:text-white border border-[#2d3139]'
+                    onClick={() => {
+                      setIsAudioMuted(!isAudioMuted);
+                      addLog(`Microfone ${!isAudioMuted ? 'desativado' : 'ativado'}`, 'info');
+                    }}
+                    className={`p-2 rounded-lg transition-colors cursor-pointer ${
+                      isAudioMuted
+                        ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                        : 'bg-[#1e2129] text-white hover:bg-[#2b2f3a]'
                     }`}
+                    title={isAudioMuted ? 'Ativar Áudio' : 'Mutar Áudio'}
                   >
-                    {q.label}
+                    {isAudioMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                   </button>
-                ))}
+
+                  <button
+                    onClick={() => {
+                      setIsVideoMuted(!isVideoMuted);
+                      addLog(`Câmera ${!isVideoMuted ? 'desativada' : 'ativada'}`, 'info');
+                    }}
+                    className={`p-2 rounded-lg transition-colors cursor-pointer ${
+                      isVideoMuted
+                        ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                        : 'bg-[#1e2129] text-white hover:bg-[#2b2f3a]'
+                    }`}
+                    title={isVideoMuted ? 'Ligar Vídeo' : 'Desligar Vídeo'}
+                  >
+                    {isVideoMuted ? <VideoOff className="w-4 h-4" /> : <Video className="w-4 h-4" />}
+                  </button>
+
+                  {sourceType === 'camera' && availableCameras.length > 1 && (
+                    <button
+                      onClick={handleSwitchCamera}
+                      className="p-2 rounded-lg bg-[#1e2129] text-white hover:bg-[#2b2f3a] transition-colors cursor-pointer"
+                      title="Trocar Câmera"
+                    >
+                      <SwitchCamera className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="text-[11px] font-mono text-[#9aa0a6] truncate px-2">
+                  {sourceType === 'screen' ? 'Compartilhando Tela' : availableCameras.find((c) => c.deviceId === selectedCameraId)?.label || 'Câmera Padrão'}
+                </div>
               </div>
             </div>
 
-            {/* Audio & Video Toggles */}
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setIsAudioMuted(!isAudioMuted)}
-                className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium border transition-all cursor-pointer ${
-                  isAudioMuted
-                    ? 'bg-[#ea4335]/15 border-[#ea4335]/40 text-[#f28b82]'
-                    : 'bg-[#101215] border-[#2d3139] text-[#81c995]'
-                }`}
-              >
-                {isAudioMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                <span>{isAudioMuted ? 'Microfone Mudo' : 'Áudio Ativo'}</span>
-              </button>
+            {/* Quick Live URLs */}
+            <div className="bg-[#171920] p-4 rounded-xl border border-[#282c37] flex flex-col gap-3">
+              <span className="text-xs font-semibold text-white flex items-center gap-1.5">
+                <ExternalLink className="w-3.5 h-3.5 text-[#8ab4f8]" />
+                Links Diretos do Canal Gerado
+              </span>
 
-              <button
-                type="button"
-                onClick={() => setIsVideoMuted(!isVideoMuted)}
-                className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium border transition-all cursor-pointer ${
-                  isVideoMuted
-                    ? 'bg-[#ea4335]/15 border-[#ea4335]/40 text-[#f28b82]'
-                    : 'bg-[#101215] border-[#2d3139] text-[#8ab4f8]'
-                }`}
-              >
-                {isVideoMuted ? <VideoOff className="w-4 h-4" /> : <Video className="w-4 h-4" />}
-                <span>{isVideoMuted ? 'Vídeo Desligado' : 'Vídeo Ativo'}</span>
-              </button>
-            </div>
+              <div className="flex flex-col gap-2 text-xs font-mono">
+                {/* Viewer URL */}
+                <div className="flex items-center justify-between gap-2 p-2 bg-[#0e1014] rounded-lg border border-[#252833]">
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <span className="text-emerald-400 font-bold shrink-0">RECEPTOR:</span>
+                    <span className="text-[#9aa0a6] truncate">{viewerDirectUrl}</span>
+                  </div>
+                  <button
+                    onClick={() => copyText(viewerDirectUrl, 'viewer_url')}
+                    className="p-1.5 rounded hover:bg-[#1e2129] text-[#8ab4f8] shrink-0 cursor-pointer"
+                    title="Copiar link do receptor"
+                  >
+                    {copiedKey === 'viewer_url' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
 
-            {/* Primary Action: Launch Transmission Button */}
-            <button
-              type="button"
-              onClick={handleLaunchBroadcast}
-              className="w-full mt-2 py-3.5 px-4 rounded-xl bg-gradient-to-r from-[#1a73e8] to-[#1558b0] hover:brightness-110 active:scale-[0.99] text-white font-semibold text-sm shadow-xl flex items-center justify-center gap-2.5 transition-all cursor-pointer"
-            >
-              <Radio className="w-5 h-5 text-white animate-pulse" />
-              <span>Iniciar Transmissão de Câmera Agora</span>
-            </button>
-
-            {/* Shareable Links Bar */}
-            <div className="flex flex-col gap-2 pt-2 border-t border-[#2d3139]">
-              <span className="text-[11px] text-[#9aa0a6] font-medium">Links Rápidos para Compartilhar:</span>
-              <div className="flex items-center justify-between p-2.5 bg-[#101215] rounded-xl border border-[#2d3139] text-xs">
-                <span className="text-[#8ab4f8] font-mono truncate max-w-[220px]">
-                  {viewerDirectUrl}
-                </span>
-                <button
-                  onClick={() => copyText(viewerDirectUrl, 'viewer_link')}
-                  className="text-[11px] text-[#8ab4f8] hover:text-white flex items-center gap-1 bg-[#1f222a] px-2 py-1 rounded-lg border border-[#3b404d] transition-colors cursor-pointer"
-                >
-                  {copiedKey === 'viewer_link' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                  <span>{copiedKey === 'viewer_link' ? 'Copiado!' : 'Copiar'}</span>
-                </button>
+                {/* Sender URL */}
+                <div className="flex items-center justify-between gap-2 p-2 bg-[#0e1014] rounded-lg border border-[#252833]">
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <span className="text-[#8ab4f8] font-bold shrink-0">EMISSOR:</span>
+                    <span className="text-[#9aa0a6] truncate">{senderUrl}</span>
+                  </div>
+                  <button
+                    onClick={() => copyText(senderUrl, 'sender_url')}
+                    className="p-1.5 rounded hover:bg-[#1e2129] text-[#8ab4f8] shrink-0 cursor-pointer"
+                    title="Copiar link do transmissor"
+                  >
+                    {copiedKey === 'sender_url' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Right Column: Live Camera Preview & Real-Time Stats */}
-          <div className="lg:col-span-7 flex flex-col gap-4">
-            {/* Live Video Preview Box */}
-            <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-black border border-[#2d3139] shadow-2xl flex items-center justify-center group">
-              <video
-                ref={videoPreviewRef}
-                autoPlay
-                playsInline
-                muted
-                className={`w-full h-full object-cover ${
-                  sourceType === 'camera' ? 'scale-x-[-1]' : ''
-                } transition-opacity duration-200 ${
-                  !isVideoMuted && previewStream ? 'opacity-100' : 'opacity-0 absolute pointer-events-none'
-                }`}
-              />
+          {/* Right Column: Parameters & Launch Button */}
+          <div className="lg:col-span-5 flex flex-col gap-4">
+            <div className="bg-[#171920] p-5 rounded-2xl border border-[#282c37] flex flex-col gap-4">
+              <h2 className="text-sm font-semibold text-white flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-[#8ab4f8]" />
+                  Configurações da Transmissão
+                </span>
+                <span className="text-[10px] text-[#9aa0a6] font-normal">P2P Firestore</span>
+              </h2>
 
-              {/* Offline / Inactive State */}
-              {(isVideoMuted || !previewStream) && (
-                <div className="flex flex-col items-center justify-center gap-3 p-6 text-center select-none">
-                  <div className="w-16 h-16 rounded-full bg-[#1a73e8]/20 border border-[#1a73e8]/40 flex items-center justify-center text-[#8ab4f8]">
-                    <VideoOff className="w-7 h-7" />
-                  </div>
-                  <div>
-                    <span className="text-sm font-semibold text-white">Visualização Pausada</span>
-                    <p className="text-xs text-[#9aa0a6] mt-1">Ative o vídeo para visualizar sua câmera ao vivo.</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Camera Live Indicator Tag */}
-              {!isVideoMuted && previewStream && (
-                <div className="absolute top-3 left-3 bg-black/70 backdrop-blur-md px-3 py-1 rounded-full border border-white/10 flex items-center gap-2 text-xs text-white">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span className="font-medium">Preview Local Ativo</span>
-                  <span className="text-[#9aa0a6]">•</span>
-                  <span className="text-[#8ab4f8] font-mono">{selectedQuality}</span>
-                </div>
-              )}
-
-              {/* Audio Level Indicator */}
-              {!isAudioMuted && previewStream && (
-                <div className="absolute top-3 right-3 bg-black/70 backdrop-blur-md px-2.5 py-1 rounded-full border border-white/10 flex items-center gap-1.5 text-xs text-emerald-400">
-                  <Volume2 className="w-3.5 h-3.5" />
-                  <div className="flex items-end gap-0.5 h-3">
-                    <span
-                      className="w-1 bg-emerald-400 rounded-full transition-all duration-75"
-                      style={{ height: `${Math.max(3, (audioLevel * 12) / 100)}px` }}
-                    />
-                    <span
-                      className="w-1 bg-emerald-400 rounded-full transition-all duration-75"
-                      style={{ height: `${Math.max(3, (audioLevel * 15) / 100)}px` }}
-                    />
-                    <span
-                      className="w-1 bg-emerald-400 rounded-full transition-all duration-75"
-                      style={{ height: `${Math.max(3, (audioLevel * 8) / 100)}px` }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Quick Switch Camera Button on Video Overlay */}
-              {availableCameras.length > 1 && sourceType === 'camera' && (
-                <button
-                  type="button"
-                  onClick={handleSwitchCamera}
-                  className="absolute bottom-3 right-3 bg-black/70 hover:bg-black text-white p-2.5 rounded-full border border-white/15 transition-all shadow-lg cursor-pointer"
-                  title="Alternar Câmera"
-                >
-                  <SwitchCamera className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-
-            {/* WebRTC Live Telemetry & Event Log Box */}
-            <div className="bg-[#181a1f] p-4 sm:p-5 rounded-2xl border border-[#2d3139] flex flex-col gap-3">
-              <div className="flex items-center justify-between text-xs">
+              {/* Room Code */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-[#9aa0a6]">Código do Canal (Room ID)</label>
                 <div className="flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-emerald-400" />
-                  <span className="font-semibold text-white">Telemetria & Console de Eventos WebRTC</span>
+                  <input
+                    type="text"
+                    value={roomCode}
+                    onChange={(e) => setRoomCode(e.target.value.toLowerCase().replace(/[^a-z0-9-_]/g, ''))}
+                    placeholder="ex: camera-sala-01"
+                    className="flex-1 bg-[#0e1014] border border-[#2a2e3b] focus:border-[#1a73e8] rounded-xl px-3 py-2 text-xs font-mono text-white outline-none"
+                  />
+                  <button
+                    onClick={generateNewRoomCode}
+                    className="p-2 bg-[#1e2129] hover:bg-[#2b2f3a] text-[#8ab4f8] rounded-xl border border-[#2a2e3b] text-xs transition-colors cursor-pointer"
+                    title="Gerar código aleatório"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
                 </div>
-                <span className="text-[11px] text-[#9aa0a6] font-mono">Signaling: Firestore P2P</span>
               </div>
 
-              {/* Event Logs List */}
-              <div className="bg-[#101215] p-3 rounded-xl border border-[#2d3139] font-mono text-[11px] flex flex-col gap-1.5 max-h-36 overflow-y-auto">
-                {eventLogs.map((log, idx) => (
-                  <div key={idx} className="flex items-start gap-2">
-                    <span className="text-[#9aa0a6] shrink-0">[{log.time}]</span>
-                    <span
-                      className={
-                        log.type === 'success'
-                          ? 'text-emerald-400'
-                          : log.type === 'warn'
-                          ? 'text-[#ea4335]'
-                          : 'text-[#8ab4f8]'
-                      }
-                    >
-                      {log.text}
-                    </span>
-                  </div>
-                ))}
+              {/* Capture Source Type */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-[#9aa0a6]">Fonte de Mídia</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => {
+                      setSourceType('camera');
+                      addLog('Fonte selecionada: Câmera', 'info');
+                    }}
+                    className={`flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-medium border transition-colors cursor-pointer ${
+                      sourceType === 'camera'
+                        ? 'bg-[#1a73e8] text-white border-[#1a73e8]'
+                        : 'bg-[#0e1014] text-[#9aa0a6] border-[#2a2e3b] hover:text-white'
+                    }`}
+                  >
+                    <Video className="w-3.5 h-3.5" />
+                    <span>Câmera Web/Celular</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setSourceType('screen');
+                      addLog('Fonte selecionada: Compartilhamento de Tela', 'info');
+                    }}
+                    className={`flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-medium border transition-colors cursor-pointer ${
+                      sourceType === 'screen'
+                        ? 'bg-[#1a73e8] text-white border-[#1a73e8]'
+                        : 'bg-[#0e1014] text-[#9aa0a6] border-[#2a2e3b] hover:text-white'
+                    }`}
+                  >
+                    <Monitor className="w-3.5 h-3.5" />
+                    <span>Tela / Janela</span>
+                  </button>
+                </div>
               </div>
+
+              {/* Camera Selection dropdown */}
+              {sourceType === 'camera' && availableCameras.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-[#9aa0a6]">Dispositivo de Câmera</label>
+                  <select
+                    value={selectedCameraId}
+                    onChange={(e) => {
+                      setSelectedCameraId(e.target.value);
+                      addLog(`Dispositivo alterado para: ${e.target.value}`, 'info');
+                    }}
+                    className="w-full bg-[#0e1014] border border-[#2a2e3b] rounded-xl px-3 py-2 text-xs text-white outline-none cursor-pointer"
+                  >
+                    {availableCameras.map((cam, idx) => (
+                      <option key={cam.deviceId || idx} value={cam.deviceId} className="bg-[#171920]">
+                        {cam.label || `Câmera ${idx + 1}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Quality Preset */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-[#9aa0a6]">Qualidade e Resolução</label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {VIDEO_QUALITIES.map((q) => (
+                    <button
+                      key={q.id}
+                      onClick={() => {
+                        setSelectedQuality(q.id);
+                        addLog(`Qualidade definida para: ${q.label}`, 'info');
+                      }}
+                      className={`py-1.5 text-xs rounded-lg font-mono font-medium border transition-all cursor-pointer ${
+                        selectedQuality === q.id
+                          ? 'bg-[#1a73e8] text-white border-[#1a73e8] shadow-sm'
+                          : 'bg-[#0e1014] text-[#9aa0a6] border-[#2a2e3b] hover:text-white'
+                      }`}
+                    >
+                      {q.id.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Big Action: Launch Broadcast */}
+              <button
+                onClick={handleLaunchBroadcast}
+                className="w-full mt-2 py-3 bg-[#1a73e8] hover:bg-[#1558b0] text-white font-medium text-xs rounded-xl flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer"
+              >
+                <Play className="w-4 h-4 fill-white" />
+                <span>Iniciar Transmissão de Câmera Agora</span>
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* TAB 2: PLAYGROUND & SANDBOX INTERATIVO */}
-      {activeSubTab === 'playground' && (
-        <div className="flex flex-col gap-5">
-          {/* Playground Top Controls Bar */}
-          <div className="bg-[#181a1f] p-4 rounded-2xl border border-[#2d3139] flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[#9aa0a6] font-medium">Modo:</span>
-                <select
-                  value={sandboxMode}
-                  onChange={(e) => setSandboxMode(e.target.value as 'stream' | 'meeting')}
-                  className="bg-[#101215] border border-[#3b404d] rounded-lg px-2.5 py-1.5 text-white focus:outline-none"
-                >
-                  <option value="stream">Transmissão P2P (Stream)</option>
-                  <option value="meeting">Reunião Completa (Meeting)</option>
-                </select>
-              </div>
-
-              {sandboxMode === 'stream' && (
+      {/* TAB 2: CONSOLE & LOGS WEBRTC */}
+      {activeSubTab === 'console' && (
+        <div className="flex flex-col gap-4">
+          <div className="bg-[#101217] rounded-2xl border border-[#2d3139] overflow-hidden shadow-2xl flex flex-col">
+            {/* Terminal Header */}
+            <div className="flex items-center justify-between px-4 py-3 bg-[#171920] border-b border-[#2d3139] text-xs">
+              <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[#9aa0a6] font-medium">Papel:</span>
-                  <select
-                    value={sandboxRole}
-                    onChange={(e) => setSandboxRole(e.target.value as StreamRole)}
-                    className="bg-[#101215] border border-[#3b404d] rounded-lg px-2.5 py-1.5 text-white focus:outline-none"
-                  >
-                    <option value="viewer">Receptor (Viewer / Assistir)</option>
-                    <option value="sender">Transmissor (Sender / Câmera)</option>
-                  </select>
+                  <span className="w-2.5 h-2.5 rounded-full bg-red-500/80" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500/80" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/80" />
                 </div>
-              )}
-
-              <div className="flex items-center gap-1.5">
-                <span className="text-[#9aa0a6] font-medium">Qualidade:</span>
-                <select
-                  value={sandboxQuality}
-                  onChange={(e) => setSandboxQuality(e.target.value as VideoQualityId)}
-                  className="bg-[#101215] border border-[#3b404d] rounded-lg px-2.5 py-1.5 text-white focus:outline-none"
-                >
-                  <option value="1080p">1080p (Full HD)</option>
-                  <option value="720p">720p (HD Padrão)</option>
-                  <option value="480p">480p (Econômico)</option>
-                  <option value="360p">360p (Baixo Consumo)</option>
-                </select>
+                <span className="font-mono text-white font-semibold ml-2">webrtc-signaling.log</span>
               </div>
 
-              <label className="flex items-center gap-1.5 text-[#9aa0a6] cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={sandboxEmbed}
-                  onChange={(e) => setSandboxEmbed(e.target.checked)}
-                  className="rounded border-[#3b404d] text-[#1a73e8]"
-                />
-                <span>Embed Limpo</span>
-              </label>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={clearLogs}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#222530] hover:bg-[#2c303c] text-[#9aa0a6] hover:text-white transition-colors cursor-pointer text-[11px]"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>Limpar</span>
+                </button>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setSplitViewMode(!splitViewMode)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all cursor-pointer ${
-                  splitViewMode
-                    ? 'bg-purple-600/20 border-purple-500 text-purple-300'
-                    : 'bg-[#252830] border-[#3b404d] text-[#9aa0a6] hover:text-white'
-                }`}
-              >
-                <Layers className="w-3.5 h-3.5" />
-                <span>{splitViewMode ? 'Visão Dupla (Sender + Viewer)' : 'Visão Única'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIframeReloadKey((k) => k + 1)}
-                className="flex items-center gap-1.5 bg-[#252830] hover:bg-[#30343f] text-white px-3 py-1.5 rounded-lg border border-[#3b404d] transition-colors cursor-pointer"
-                title="Recarregar Sandbox"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>Recarregar</span>
-              </button>
+            {/* Terminal Body */}
+            <div className="p-4 font-mono text-xs text-[#dcdfe4] space-y-1.5 max-h-[480px] overflow-y-auto">
+              {eventLogs.map((log, idx) => (
+                <div key={idx} className="flex items-start gap-2.5 leading-relaxed">
+                  <span className="text-[#6b7280] select-none text-[11px] shrink-0">[{log.time}]</span>
+                  <span
+                    className={
+                      log.type === 'success'
+                        ? 'text-emerald-400 font-semibold'
+                        : log.type === 'warn'
+                        ? 'text-amber-400'
+                        : 'text-[#9aa0a6]'
+                    }
+                  >
+                    {log.type === 'success' && '✔ '}
+                    {log.type === 'warn' && '⚠ '}
+                    {log.type === 'info' && 'ℹ '}
+                    {log.text}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
+        </div>
+      )}
 
-          {/* Sandbox Live Viewport */}
+      {/* TAB 3: SANDBOX & SPLIT VIEW */}
+      {activeSubTab === 'playground' && (
+        <div className="flex flex-col gap-5">
+          {/* Controls Bar */}
+          <div className="bg-[#171920] p-4 rounded-xl border border-[#282c37] flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-[#9aa0a6] font-medium">Modo de Exibição:</span>
+              <button
+                onClick={() => setSplitViewMode(!splitViewMode)}
+                className={`px-3 py-1.5 rounded-lg border font-medium transition-colors cursor-pointer ${
+                  splitViewMode
+                    ? 'bg-[#1a73e8] border-[#1a73e8] text-white'
+                    : 'bg-[#222530] border-[#2d3139] text-[#9aa0a6] hover:text-white'
+                }`}
+              >
+                {splitViewMode ? 'Visão Dupla Split Ativa' : 'Visão Simples'}
+              </button>
+            </div>
+
+            <button
+              onClick={() => setIframeReloadKey((k) => k + 1)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#222530] hover:bg-[#2c303c] text-white border border-[#2d3139] transition-colors cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Recarregar Iframe(s)</span>
+            </button>
+          </div>
+
+          {/* Sandbox Iframes Stage */}
           {splitViewMode ? (
-            /* Split View: Sender on Left, Viewer on Right */
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Left: Sender Iframe */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Left: Sender */}
               <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between text-xs px-1 text-[#9aa0a6]">
-                  <span className="font-semibold text-white flex items-center gap-1.5">
-                    <Radio className="w-3.5 h-3.5 text-[#8ab4f8]" />
-                    Transmissor (Câmera Local)
-                  </span>
-                  <span className="font-mono text-[11px] text-[#8ab4f8]">role=sender</span>
-                </div>
+                <span className="text-xs font-semibold text-white flex items-center gap-1.5 px-1">
+                  <Radio className="w-3.5 h-3.5 text-[#8ab4f8]" />
+                  Transmissor (role=sender)
+                </span>
                 <div className="relative w-full h-[460px] rounded-2xl overflow-hidden bg-[#0c0d10] border border-[#2d3139] shadow-2xl">
                   <iframe
-                    key={`sender-${iframeReloadKey}`}
-                    src={`${baseUrl}/?mode=stream&role=sender&room=${cleanRoomCode}&embed=true&quality=${sandboxQuality}`}
+                    key={`sender-${iframeReloadKey}-${controlsMode}`}
+                    src={`${baseUrl}/?mode=stream&role=sender&room=${cleanRoomCode}&embed=true&quality=${sandboxQuality}${getControlsQuery()}`}
                     className="w-full h-full border-0"
                     allow="camera; microphone; display-capture; autoplay; fullscreen"
                     allowFullScreen
@@ -913,19 +1016,16 @@ Instruções para OBS Studio:
                 </div>
               </div>
 
-              {/* Right: Viewer Iframe */}
+              {/* Right: Viewer */}
               <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between text-xs px-1 text-[#9aa0a6]">
-                  <span className="font-semibold text-white flex items-center gap-1.5">
-                    <Tv className="w-3.5 h-3.5 text-emerald-400" />
-                    Receptor (Visualização Remota)
-                  </span>
-                  <span className="font-mono text-[11px] text-emerald-400">role=viewer</span>
-                </div>
+                <span className="text-xs font-semibold text-white flex items-center gap-1.5 px-1">
+                  <Tv className="w-3.5 h-3.5 text-emerald-400" />
+                  Receptor Remoto (role=viewer)
+                </span>
                 <div className="relative w-full h-[460px] rounded-2xl overflow-hidden bg-[#0c0d10] border border-[#2d3139] shadow-2xl">
                   <iframe
-                    key={`viewer-${iframeReloadKey}`}
-                    src={`${baseUrl}/?mode=stream&role=viewer&room=${cleanRoomCode}&embed=true`}
+                    key={`viewer-${iframeReloadKey}-${controlsMode}`}
+                    src={`${baseUrl}/?mode=stream&role=viewer&room=${cleanRoomCode}&embed=true${getControlsQuery()}`}
                     className="w-full h-full border-0"
                     allow="camera; microphone; display-capture; autoplay; fullscreen"
                     allowFullScreen
@@ -934,8 +1034,7 @@ Instruções para OBS Studio:
               </div>
             </div>
           ) : (
-            /* Single Sandbox Iframe */
-            <div className="relative w-full h-[540px] rounded-2xl overflow-hidden bg-[#0c0d10] border border-[#2d3139] shadow-2xl">
+            <div className="relative w-full h-[520px] rounded-2xl overflow-hidden bg-[#0c0d10] border border-[#2d3139] shadow-2xl">
               <iframe
                 key={`sandbox-${iframeReloadKey}`}
                 src={sandboxGeneratedUrl}
@@ -945,28 +1044,12 @@ Instruções para OBS Studio:
               />
             </div>
           )}
-
-          {/* Sandbox URL Output Bar */}
-          <div className="bg-[#181a1f] p-3.5 rounded-xl border border-[#2d3139] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2 overflow-hidden w-full">
-              <span className="text-[#9aa0a6] font-medium shrink-0">URL Sandbox:</span>
-              <span className="text-emerald-400 font-mono truncate">{sandboxGeneratedUrl}</span>
-            </div>
-            <button
-              onClick={() => copyText(sandboxGeneratedUrl, 'sandbox_url')}
-              className="flex items-center gap-1.5 bg-[#252830] hover:bg-[#30343f] text-white px-3 py-1.5 rounded-lg border border-[#3b404d] transition-colors cursor-pointer shrink-0"
-            >
-              {copiedKey === 'sandbox_url' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-              <span>{copiedKey === 'sandbox_url' ? 'Copiado!' : 'Copiar URL'}</span>
-            </button>
-          </div>
         </div>
       )}
 
-      {/* TAB 3: GERADOR DE CÓDIGO & SNIPPETS */}
+      {/* TAB 4: SNIPPETS DE INTEGRAÇÃO */}
       {activeSubTab === 'snippets' && (
         <div className="flex flex-col gap-4">
-          {/* Framework Language Selector */}
           <div className="flex items-center gap-2 border-b border-[#2d3139] pb-3 overflow-x-auto">
             <button
               onClick={() => setSnippetLanguage('iframe')}
@@ -1020,11 +1103,89 @@ Instruções para OBS Studio:
                   : 'bg-[#181a1f] text-[#9aa0a6] hover:text-white border border-[#2d3139]'
               }`}
             >
-              OBS Studio / Browser Source
+              OBS Studio
             </button>
           </div>
 
-          {/* Snippet Code Box */}
+          {/* Controls & Button Customization Card */}
+          <div className="bg-[#171920] p-4 rounded-xl border border-[#282c37] flex flex-col gap-3 text-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-[#8ab4f8]" />
+                <span className="font-semibold text-white">Configuração dos Botões e Interface da Câmera:</span>
+              </div>
+              <div className="flex items-center gap-1.5 bg-[#0e1014] p-1 rounded-lg border border-[#2a2e3b]">
+                <button
+                  onClick={() => setControlsMode('all')}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+                    controlsMode === 'all'
+                      ? 'bg-[#1a73e8] text-white shadow-sm'
+                      : 'text-[#9aa0a6] hover:text-white'
+                  }`}
+                >
+                  Padrão (Todos)
+                </button>
+                <button
+                  onClick={() => setControlsMode('none')}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+                    controlsMode === 'none'
+                      ? 'bg-[#1a73e8] text-white shadow-sm'
+                      : 'text-[#9aa0a6] hover:text-white'
+                  }`}
+                >
+                  Modo Limpo (Sem Nada)
+                </button>
+                <button
+                  onClick={() => setControlsMode('custom')}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+                    controlsMode === 'custom'
+                      ? 'bg-[#1a73e8] text-white shadow-sm'
+                      : 'text-[#9aa0a6] hover:text-white'
+                  }`}
+                >
+                  Personalizar Botões
+                </button>
+              </div>
+            </div>
+
+            {controlsMode === 'custom' && (
+              <div className="pt-2 border-t border-[#2a2e3b] flex flex-wrap items-center gap-2">
+                {[
+                  { key: 'audio', label: 'Microfone' },
+                  { key: 'video', label: 'Câmera' },
+                  { key: 'switchcamera', label: 'Trocar Câmera' },
+                  { key: 'screenshare', label: 'Compartilhar Tela' },
+                  { key: 'quality', label: 'Qualidade' },
+                  { key: 'fullscreen', label: 'Tela Cheia' },
+                  { key: 'pip', label: 'Picture-in-Picture' },
+                  { key: 'leave', label: 'Botão Sair' },
+                  { key: 'header', label: 'Cabeçalho Superior' },
+                ].map((item) => {
+                  const isChecked = selectedButtons[item.key] ?? false;
+                  return (
+                    <button
+                      key={item.key}
+                      onClick={() => toggleButtonOption(item.key)}
+                      className={`px-2.5 py-1 rounded-lg border text-[11px] flex items-center gap-1.5 transition-all cursor-pointer ${
+                        isChecked
+                          ? 'bg-[#1a73e8]/20 border-[#1a73e8] text-[#8ab4f8]'
+                          : 'bg-[#101216] border-[#2c303c] text-[#6b7280] line-through'
+                      }`}
+                    >
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full ${
+                          isChecked ? 'bg-[#8ab4f8]' : 'bg-[#6b7280]'
+                        }`}
+                      />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Snippet Output Box */}
           <div className="relative rounded-2xl overflow-hidden bg-[#0e1013] border border-[#2d3139] shadow-2xl">
             <div className="flex items-center justify-between px-5 py-3 bg-[#16181d] border-b border-[#2d3139] text-xs">
               <span className="font-semibold text-white flex items-center gap-2">
@@ -1047,56 +1208,56 @@ Instruções para OBS Studio:
         </div>
       )}
 
-      {/* TAB 4: SDK JS & RECURSOS */}
+      {/* TAB 5: RECURSOS & IAS (COM LINKS GITHUB REQUISITADOS) */}
       {activeSubTab === 'sdk' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-8 flex flex-col gap-4">
-            <div className="bg-[#181a1f] p-5 rounded-2xl border border-[#2d3139] flex flex-col gap-3">
+            <div className="bg-[#171920] p-5 rounded-2xl border border-[#282c37] flex flex-col gap-3">
               <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                <Code2 className="w-4 h-4 text-[#8ab4f8]" />
-                API do SDK JavaScript (`videomeet-sdk.js`)
+                <Sparkles className="w-4 h-4 text-purple-400" />
+                Prompt para Assistentes de IA (ChatGPT, Claude, Cursor, Gemini)
               </h3>
               <p className="text-xs text-[#9aa0a6] leading-relaxed">
-                O arquivo <code className="text-[#8ab4f8] bg-[#101215] px-1.5 py-0.5 rounded">videomeet-sdk.js</code> expõe o objeto global <code className="text-[#8ab4f8]">VideoMeet</code> para integração direta sem necessidade de instalar pacotes npm complexos.
+                Utilize a documentação em texto puro para que a IA gere código de integração perfeitamente tipado e com todas as opções WebRTC.
               </p>
 
-              <div className="space-y-3 pt-2 text-xs">
-                <div className="p-3 bg-[#101215] rounded-xl border border-[#2d3139]">
-                  <span className="font-mono text-[#8ab4f8] font-semibold">VideoMeet.createViewer(options)</span>
-                  <p className="text-[#9aa0a6] mt-1 text-[11px]">
-                    Cria e anexa o iframe receptor para exibir a transmissão de uma câmera remota pareada pelo código.
-                  </p>
+              <div className="p-3 bg-[#101215] rounded-xl border border-[#2d3139] text-xs font-mono flex items-center justify-between gap-3">
+                <div className="truncate text-purple-300">
+                  {LLMS_RAW_URL}
                 </div>
+                <a
+                  href={LLMS_RAW_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-[11px] bg-purple-600 hover:bg-purple-700 text-white px-2.5 py-1 rounded-lg shrink-0 transition-colors"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span>Abrir llms.txt</span>
+                </a>
+              </div>
 
-                <div className="p-3 bg-[#101215] rounded-xl border border-[#2d3139]">
-                  <span className="font-mono text-[#8ab4f8] font-semibold">VideoMeet.createSender(options)</span>
-                  <p className="text-[#9aa0a6] mt-1 text-[11px]">
-                    Cria o emissor para que o usuário compartilhe sua câmera ou tela no código especificado.
-                  </p>
+              <div className="p-3 bg-[#101215] rounded-xl border border-[#2d3139] text-xs font-mono flex items-center justify-between gap-3">
+                <div className="truncate text-[#8ab4f8]">
+                  {DOCS_RAW_URL}
                 </div>
-
-                <div className="p-3 bg-[#101215] rounded-xl border border-[#2d3139]">
-                  <span className="font-mono text-[#8ab4f8] font-semibold">VideoMeet.createCall(options)</span>
-                  <p className="text-[#9aa0a6] mt-1 text-[11px]">
-                    Inicia uma videoconferência completa com múltiplos participantes, chat e áudio/vídeo bidirecional.
-                  </p>
-                </div>
-
-                <div className="p-3 bg-[#101215] rounded-xl border border-[#2d3139]">
-                  <span className="font-mono text-[#8ab4f8] font-semibold">VideoMeet.generateCode()</span>
-                  <p className="text-[#9aa0a6] mt-1 text-[11px]">
-                    Gera um código aleatório no padrão <code className="text-white">abc-defg-hij</code>.
-                  </p>
-                </div>
+                <a
+                  href={DOCS_RAW_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-[11px] bg-[#1a73e8] hover:bg-[#1558b0] text-white px-2.5 py-1 rounded-lg shrink-0 transition-colors"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span>Abrir docs.txt</span>
+                </a>
               </div>
             </div>
           </div>
 
           <div className="lg:col-span-4 flex flex-col gap-4">
-            <div className="bg-[#181a1f] p-5 rounded-2xl border border-[#2d3139] flex flex-col gap-3">
+            <div className="bg-[#171920] p-5 rounded-2xl border border-[#282c37] flex flex-col gap-3">
               <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                 <Download className="w-4 h-4 text-emerald-400" />
-                Recursos para Download
+                Arquivos do SDK
               </h3>
 
               <div className="flex flex-col gap-2 text-xs">
@@ -1113,25 +1274,27 @@ Instruções para OBS Studio:
                 </a>
 
                 <a
-                  href="/llms.txt"
+                  href={LLMS_RAW_URL}
                   target="_blank"
+                  rel="noopener noreferrer"
                   className="flex items-center justify-between p-3 rounded-xl bg-[#101215] hover:bg-[#1a1d24] border border-[#2d3139] transition-colors"
                 >
                   <div className="flex items-center gap-2">
                     <FileText className="w-4 h-4 text-purple-400" />
-                    <span className="text-white font-medium">llms.txt (Prompt para IAs)</span>
+                    <span className="text-white font-medium">llms.txt (GitHub Raw)</span>
                   </div>
                   <ExternalLink className="w-3.5 h-3.5 text-[#9aa0a6]" />
                 </a>
 
                 <a
-                  href="/docs.txt"
+                  href={DOCS_RAW_URL}
                   target="_blank"
+                  rel="noopener noreferrer"
                   className="flex items-center justify-between p-3 rounded-xl bg-[#101215] hover:bg-[#1a1d24] border border-[#2d3139] transition-colors"
                 >
                   <div className="flex items-center gap-2">
                     <FileText className="w-4 h-4 text-[#8ab4f8]" />
-                    <span className="text-white font-medium">docs.txt (Doc Completa em TXT)</span>
+                    <span className="text-white font-medium">docs.txt (GitHub Raw)</span>
                   </div>
                   <ExternalLink className="w-3.5 h-3.5 text-[#9aa0a6]" />
                 </a>
