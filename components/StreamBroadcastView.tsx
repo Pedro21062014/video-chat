@@ -319,57 +319,77 @@ export const StreamBroadcastView: React.FC<StreamBroadcastViewProps> = ({
           } ${isVideoLoaded && activeStream ? 'opacity-100' : 'opacity-0'}`}
         />
 
-        {/* MODERN MINIMALIST CAMERA SKELETON LOADER */}
-        {showSkeleton && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0d0e12] overflow-hidden z-10 transition-opacity duration-300">
-            {/* Ambient Shimmer Background */}
-            <div className="absolute inset-0 bg-gradient-to-tr from-[#12141c] via-[#171a24] to-[#0d0e12] animate-pulse" />
-
-            {/* Viewfinder Reticle Box */}
-            <div className="relative z-10 flex flex-col items-center justify-center p-6 text-center max-w-sm">
-              {/* Pulsing Aperture Icon with Concentric Rings */}
-              <div className="relative mb-5 flex items-center justify-center">
-                <div className="w-20 h-20 rounded-2xl bg-[#1e212b] border border-[#303646] flex items-center justify-center text-[#8ab4f8] shadow-2xl relative z-10">
-                  <Camera className="w-9 h-9 animate-pulse text-[#8ab4f8]" />
+        {/* CLOUDFLARE-STYLE MODERN MINIMALIST SKELETON LOADER */}
+        {((!isVideoLoaded || !activeStream) && !(isSender && isVideoMuted && !isScreenSharing)) && (
+          <div className="absolute inset-0 flex flex-col justify-between p-5 sm:p-8 bg-[#0b0c10] overflow-hidden z-10 select-none pointer-events-none transition-opacity duration-300">
+            {/* Top Skeleton Header */}
+            <div className="relative z-10 flex items-center justify-between w-full">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-white/[0.07] animate-pulse" />
+                <div className="flex flex-col gap-1.5">
+                  <div className="w-28 sm:w-36 h-3.5 bg-white/[0.08] rounded-md animate-pulse" />
+                  <div className="w-16 sm:w-20 h-2.5 bg-white/[0.04] rounded-md animate-pulse" />
                 </div>
-                {/* Glow & Ping Rings */}
-                <span className="absolute w-24 h-24 rounded-2xl bg-[#1a73e8]/20 animate-ping pointer-events-none" />
-                <span className="absolute w-28 h-28 rounded-3xl border border-[#1a73e8]/30 animate-pulse pointer-events-none" />
               </div>
-
-              {/* Status Header */}
-              <div className="flex items-center gap-2 bg-[#191c24] px-3 py-1 rounded-full border border-[#2e3342] text-[11px] font-mono text-[#8ab4f8] mb-2.5 shadow-sm">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span>{isSender ? 'SINAL DA CÂMERA' : 'RECEBENDO TRANSMISSÃO'}</span>
+              <div className="flex items-center gap-2">
+                <div className="w-16 h-5 rounded-full bg-white/[0.06] animate-pulse" />
+                <div className="w-7 h-5 rounded-md bg-white/[0.04] animate-pulse" />
               </div>
+            </div>
 
-              <h3 className="text-base font-semibold text-white tracking-tight">
-                {isSender ? 'Iniciando captura de vídeo...' : 'Decodificando primeiro frame...'}
-              </h3>
-              <p className="text-xs text-[#9aa0a6] mt-1 leading-relaxed">
-                {isSender
-                  ? 'Ajustando taxa de 60 FPS e inicializando hardware WebRTC'
-                  : 'Sincronizando stream P2P de ultrabaixa latência'}
-              </p>
+            {/* Center Skeleton Stage / Card Rows (Matching Video Example) */}
+            <div className="relative z-10 w-full max-w-2xl mx-auto flex flex-col gap-3 my-auto">
+              <div className="w-full bg-[#14161d]/80 rounded-2xl border border-white/[0.06] p-5 sm:p-6 backdrop-blur-md shadow-2xl flex flex-col gap-4 animate-pulse">
+                {/* Table Header Row */}
+                <div className="flex items-center justify-between border-b border-white/[0.06] pb-3.5">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-3.5 h-3.5 rounded-full bg-white/[0.12]" />
+                    <div className="w-32 h-3.5 rounded-md bg-white/[0.12]" />
+                  </div>
+                  <div className="w-16 h-3 rounded-md bg-white/[0.08]" />
+                </div>
 
-              {/* Shimmer Line Bar */}
-              <div className="w-48 h-1.5 bg-[#1e212b] rounded-full overflow-hidden mt-4 relative">
-                <div className="absolute inset-0 w-1/2 bg-gradient-to-r from-transparent via-[#8ab4f8] to-transparent animate-[shimmer_1.5s_infinite] -translate-x-full" />
+                {/* Table Placeholder Rows */}
+                <div className="flex flex-col gap-3.5 py-1">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-2.5 flex-1">
+                      <div className="w-2 h-2 rounded-full bg-white/[0.15]" />
+                      <div className="w-3/5 h-3 rounded-md bg-white/[0.08]" />
+                    </div>
+                    <div className="w-14 h-3.5 rounded-md bg-white/[0.08] shrink-0" />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-2.5 flex-1">
+                      <div className="w-2 h-2 rounded-full bg-white/[0.12]" />
+                      <div className="w-4/5 h-3 rounded-md bg-white/[0.08]" />
+                    </div>
+                    <div className="w-20 h-3.5 rounded-md bg-white/[0.08] shrink-0" />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-2.5 flex-1">
+                      <div className="w-2 h-2 rounded-full bg-white/[0.12]" />
+                      <div className="w-1/2 h-3 rounded-md bg-white/[0.08]" />
+                    </div>
+                    <div className="w-16 h-3.5 rounded-md bg-white/[0.08] shrink-0" />
+                  </div>
+                </div>
+
+                {/* Shimmer Wave Line */}
+                <div className="w-full h-1 bg-white/[0.04] rounded-full overflow-hidden relative mt-1">
+                  <div className="absolute inset-0 w-1/3 bg-gradient-to-r from-transparent via-white/15 to-transparent animate-[shimmer_1.5s_infinite] -translate-x-full" />
+                </div>
               </div>
+            </div>
 
-              {/* Technical badges */}
-              <div className="flex items-center gap-2 mt-4 text-[10px] text-[#9aa0a6] font-mono">
-                <span className="px-2 py-0.5 rounded bg-[#171921] border border-[#2a2e3b]">
-                  {videoQuality.toUpperCase()}
-                </span>
-                <span>•</span>
-                <span className="px-2 py-0.5 rounded bg-[#171921] border border-[#2a2e3b]">
-                  WebRTC P2P
-                </span>
-                <span>•</span>
-                <span className="px-2 py-0.5 rounded bg-[#171921] border border-[#2a2e3b]">
-                  &lt;120ms
-                </span>
+            {/* Bottom Skeleton Footer */}
+            <div className="relative z-10 flex items-center justify-between w-full">
+              <div className="w-20 h-2.5 rounded-md bg-white/[0.04] animate-pulse" />
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full bg-white/[0.06] animate-pulse" />
+                <div className="w-7 h-7 rounded-full bg-white/[0.06] animate-pulse" />
+                <div className="w-7 h-7 rounded-full bg-white/[0.06] animate-pulse" />
               </div>
             </div>
           </div>
@@ -385,50 +405,6 @@ export const StreamBroadcastView: React.FC<StreamBroadcastViewProps> = ({
             <p className="text-xs text-[#9aa0a6] mt-1 max-w-xs">
               Clique no botão de câmera abaixo para retomar a transmissão do vídeo.
             </p>
-          </div>
-        )}
-
-        {/* Viewer Waiting for Sender to Broadcast */}
-        {!isSender && !remoteStream && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0d0e12] text-center p-6 z-10">
-            <div className="relative mb-6">
-              <div className="w-20 h-20 rounded-2xl bg-[#181a22] border border-[#2a2e3c] flex items-center justify-center text-[#8ab4f8] shadow-2xl">
-                <Radio className="w-10 h-10 animate-pulse text-[#8ab4f8]" />
-              </div>
-              <span className="absolute -top-1 -right-1 flex h-4 w-4">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#8ab4f8] opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-4 w-4 bg-[#1a73e8]"></span>
-              </span>
-            </div>
-
-            <h2 className="text-xl sm:text-2xl font-semibold text-white tracking-tight">
-              Aguardando início da transmissão...
-            </h2>
-            <p className="text-xs sm:text-sm text-[#9aa0a6] mt-2 max-w-md">
-              Pareado no canal <span className="font-mono font-bold text-[#8ab4f8]">{roomCode}</span>. Assim que o transmissor iniciar a câmera, o vídeo aparecerá aqui instantaneamente.
-            </p>
-
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-              <button
-                onClick={() => {
-                  const url = `${window.location.origin}/?mode=stream&role=sender&room=${roomCode}`;
-                  window.open(url, '_blank');
-                }}
-                className="flex items-center gap-2 bg-[#1a73e8] hover:bg-[#1558b0] text-white px-4 py-2 rounded-xl text-xs font-medium transition-all shadow-md cursor-pointer"
-              >
-                <Video className="w-4 h-4" />
-                <span>Abrir Transmissor em Nova Aba (Teste)</span>
-                <ExternalLink className="w-3.5 h-3.5 opacity-70" />
-              </button>
-
-              <button
-                onClick={onOpenIntegrationDocs}
-                className="flex items-center gap-2 bg-[#1e2129] hover:bg-[#2b2f3a] text-[#e8eaed] px-4 py-2 rounded-xl text-xs font-medium transition-colors border border-[#2d313d] cursor-pointer"
-              >
-                <Code2 className="w-4 h-4 text-[#8ab4f8]" />
-                <span>Ver Código de Integração</span>
-              </button>
-            </div>
           </div>
         )}
 

@@ -652,16 +652,45 @@ Instruções para OBS Studio:
                     } ${isPreviewLoaded ? 'opacity-100' : 'opacity-0'}`}
                   />
                   {!isPreviewLoaded && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0d0e12] overflow-hidden z-10">
-                      <div className="absolute inset-0 bg-gradient-to-tr from-[#12141c] via-[#171a24] to-[#0d0e12] animate-pulse" />
-                      <div className="relative z-10 flex flex-col items-center justify-center p-4 text-center">
-                        <div className="w-14 h-14 rounded-2xl bg-[#1e212b] border border-[#303646] flex items-center justify-center text-[#8ab4f8] shadow-lg mb-3">
-                          <Radio className="w-6 h-6 animate-pulse text-[#8ab4f8]" />
+                    <div className="absolute inset-0 flex flex-col justify-between p-4 sm:p-6 bg-[#0b0c10] overflow-hidden z-10 select-none pointer-events-none">
+                      {/* Top Skeleton Header */}
+                      <div className="flex items-center justify-between w-full">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-6 h-6 rounded-lg bg-white/[0.08] animate-pulse" />
+                          <div className="w-24 h-3 bg-white/[0.08] rounded-md animate-pulse" />
                         </div>
-                        <span className="text-xs font-medium text-white">Carregando Câmera Dev...</span>
-                        <span className="text-[11px] text-[#9aa0a6] mt-0.5">Capturando primeiro frame de vídeo</span>
-                        <div className="w-32 h-1 bg-[#1e212b] rounded-full overflow-hidden mt-3 relative">
-                          <div className="absolute inset-0 w-1/2 bg-gradient-to-r from-transparent via-[#8ab4f8] to-transparent animate-[shimmer_1.5s_infinite]" />
+                        <div className="w-12 h-4 rounded-full bg-white/[0.06] animate-pulse" />
+                      </div>
+
+                      {/* Center Table / Card Skeleton Rows */}
+                      <div className="w-full max-w-md mx-auto flex flex-col gap-2.5 my-auto">
+                        <div className="w-full bg-[#14161d]/80 rounded-xl border border-white/[0.06] p-4 backdrop-blur-md shadow-xl flex flex-col gap-3 animate-pulse">
+                          <div className="flex items-center justify-between border-b border-white/[0.06] pb-2.5">
+                            <div className="w-28 h-3 rounded-md bg-white/[0.12]" />
+                            <div className="w-12 h-2.5 rounded-md bg-white/[0.08]" />
+                          </div>
+                          <div className="flex flex-col gap-2.5 py-0.5">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="w-3/5 h-2.5 rounded-md bg-white/[0.08]" />
+                              <div className="w-10 h-2.5 rounded-md bg-white/[0.08]" />
+                            </div>
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="w-4/5 h-2.5 rounded-md bg-white/[0.08]" />
+                              <div className="w-14 h-2.5 rounded-md bg-white/[0.08]" />
+                            </div>
+                          </div>
+                          <div className="w-full h-1 bg-white/[0.04] rounded-full overflow-hidden relative">
+                            <div className="absolute inset-0 w-1/3 bg-gradient-to-r from-transparent via-white/15 to-transparent animate-[shimmer_1.5s_infinite] -translate-x-full" />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Bottom Skeleton Footer */}
+                      <div className="flex items-center justify-between w-full">
+                        <div className="w-16 h-2 rounded-md bg-white/[0.04] animate-pulse" />
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-5 h-5 rounded-full bg-white/[0.06] animate-pulse" />
+                          <div className="w-5 h-5 rounded-full bg-white/[0.06] animate-pulse" />
                         </div>
                       </div>
                     </div>
